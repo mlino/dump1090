@@ -336,7 +336,7 @@ char *getMEDescription(int metype, int mesub) {
 // and returns 1 if changed, 0 if it was unaffected.
 static int correct_aa_field(int *addr, errorinfo *ei) 
 {
-    int has_addr_errors = 0;
+    int has_addr_errors = 0, i;
 
     if (!ei)
         return 0;
@@ -376,7 +376,7 @@ int scoreModesMessage(unsigned char *msg) {
 
     case 11: { // All-call reply
         errorinfo *ei;
-        int i, addr, iid;
+        int addr, iid;
 
         if (!crc)
             return 2000; // perfect case: IID=0, correct CRC
@@ -397,7 +397,7 @@ int scoreModesMessage(unsigned char *msg) {
             return -1; // can't correct errors
 
         // fix any errors in the address
-        correct_addr_errors(&addr, ei);
+        correct_aa_field(&addr, ei);
 
         // validate address
         if (!icaoFilterTest(addr))
@@ -413,7 +413,7 @@ int scoreModesMessage(unsigned char *msg) {
     case 17:   // Extended squitter
     case 18: { // Extended squitter/non-transponder
         errorinfo *ei;
-        int has_addr_errors, i;
+        int addr;
 
         if (crc == 0)
             return 3000;
@@ -422,8 +422,8 @@ int scoreModesMessage(unsigned char *msg) {
         if (!ei)
             return -1; // can't correct errors
 
-        int addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
-        if (correct_addr_errors(&addr, ei)) {
+        addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
+        if (correct_aa_field(&addr, ei)) {
             // Revalidate if it changed
             if (!icaoFilterTest(addr))
                 return -1;
@@ -546,6 +546,7 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
         }
 
         break;
+    }
         
     case 20: // Comm-B, altitude reply
     case 21: // Comm-B, identity reply
