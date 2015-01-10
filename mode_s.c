@@ -116,12 +116,12 @@ void dumpRawMessage(char *descr, unsigned char *msg, uint16_t *m, uint32_t offse
     int  j;
     int  msgtype = msg[0] >> 3;
     int  fixable = 0;
-    int pos1, pos2;
 
     if (msgtype == 17) {
         int bits = modesMessageLenByType(msgtype);
         int crc = modesChecksum(msg, bits);
-        fixable = modesChecksumDiagnose(crc, bits, &pos1, &pos2);
+        errorinfo *ei = modesChecksumDiagnose(crc, bits);
+        fixable = (ei == NULL ? 0 : ei->errors);
     }
 
     printf("\n--- %s\n    ", descr);
@@ -331,20 +331,34 @@ char *getMEDescription(int metype, int mesub) {
     return mename;
 }
 
+// Correct an Address Announced field (bits 8-31) if it
+// is affected by the given error syndrome. Updates *addr
+// and returns 1 if changed, 0 if it was unaffected.
+static int correct_aa_field(int *addr, errorinfo *ei) 
+{
+    int has_addr_errors = 0;
+
+    if (!ei)
+        return 0;
+
+    for (i = 0; i < ei->errors; ++i) {
+        if (ei->bit[i] >= 8 && ei->bit[i] <= 31) {
+            *addr ^= 1 << (31 - ei->bit[i]);
+            has_addr_errors = 1;
+        }
+    }
+
+    return has_addr_errors;
+}
+
 // Score how plausible this ModeS message looks.
 //
 // <0        : decoding would fail
-// 500       : DF11 message with 2-bit error
-// 600       : AP/DP-type message (DF20/21), no testable CRC, but the syndrome matches a recently seen address after masking off the top byte
-// 750       : ES message with 2-bit error
-// 900       : DF11 message with IID!=0 and 1-bit error
-// 1000      : AP-type message (DF0/4/5/16/24), no testable CRC, but the syndrome matches a recently seen address
-// 1000      : AP/DP-type message (DF20/21), no testable CRC, but the syndrome matches a recently seen address
-// 1000      : DF11 message with IID=0 and 1-bit error
-// 1500      : DF11 message with IID!=0 and no errors
-// 2000      : DF11 message with IID=0 and no errors
-// 2000      : ES message with 1-bit error
-// 5000      : ES message with correct CRC
+// positive  : decoding should work
+//
+// the more positive, the more reliable the message is
+//
+
 int scoreModesMessage(unsigned char *msg) {
     int msgtype = msg[0] >> 3; // Downlink Format
     int msgbits = modesMessageLenByType(msgtype);
@@ -361,69 +375,61 @@ int scoreModesMessage(unsigned char *msg) {
         return icaoFilterTest(crc) ? 1000 : -1;
 
     case 11: { // All-call reply
-        int pos1, pos2, iid, addr, fixedbits;
+        errorinfo *ei;
+        int i, addr, iid;
 
         if (!crc)
-            return 2000;
+            return 2000; // perfect case: IID=0, correct CRC
 
         iid = crc & 0x7f;
         crc = crc & 0xffff80;
 
         addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
 
-        if (!crc) {
+        if (!crc) { // IID != 0 but CRC is OK otherwise
             if (!icaoFilterTest(addr))
                 return -1;            
             return 1500;
         }
 
-        fixedbits = modesChecksumDiagnose(crc, msgbits, &pos1, &pos2);
-        if (!fixedbits)
+        ei = modesChecksumDiagnose(crc, msgbits);
+        if (!ei)
             return -1; // can't correct errors
-        
-        {
-            // need to fix the message to test the address, so take a copy first
-            unsigned char msgcopy[MODES_SHORT_MSG_BYTES];
-            memcpy(msgcopy, msg, MODES_SHORT_MSG_BYTES);
-            modesChecksumFix(msgcopy, pos1, pos2);
 
-            addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
-            if (!icaoFilterTest(addr))
-                return -1;
-            else if (fixedbits == 2)
-                return 500;
-            else if (iid != 0)
-                return 750;
-            else
-                return 1000;
-        }
+        // fix any errors in the address
+        correct_addr_errors(&addr, ei);
+
+        // validate address
+        if (!icaoFilterTest(addr))
+            return -1;
+        else if (ei->errors >= 2)
+            return 1000 / ei->errors;
+        else if (iid != 0)
+            return 750;
+        else
+            return 1000;
     }
         
     case 17:   // Extended squitter
     case 18: { // Extended squitter/non-transponder
-        int pos1, pos2, addr, fixedbits;
+        errorinfo *ei;
+        int has_addr_errors, i;
 
         if (crc == 0)
-            return 5000;
+            return 3000;
 
-        fixedbits = modesChecksumDiagnose(crc, msgbits, &pos1, &pos2);
-        if (!fixedbits)
+        ei = modesChecksumDiagnose(crc, msgbits);
+        if (!ei)
             return -1; // can't correct errors
-        
-        {
-            // need to fix the message to test the address, so take a copy first
-            unsigned char msgcopy[MODES_LONG_MSG_BYTES];
-            memcpy(msgcopy, msg, MODES_LONG_MSG_BYTES);
-            modesChecksumFix(msgcopy, pos1, pos2);
 
-            addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
+        int addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
+        if (correct_addr_errors(&addr, ei)) {
+            // Revalidate if it changed
             if (!icaoFilterTest(addr))
                 return -1;
-            else if (fixedbits == 2)
-                return 750;
-            else
-                return 2000;
         }
+
+        return 2000 / ei->errors;
     }
 
     case 20:   // Comm-B, altitude reply
@@ -467,6 +473,8 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
     mm->crc             = modesChecksum(msg, mm->msgbits);
     mm->correctedbits   = 0;
 
+    // Do checksum work and set fields that depend on the CRC
+
     switch (mm->msgtype) {
     case 0: // short air-air surveillance
     case 4: // surveillance, altitude reply
@@ -476,8 +484,10 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
         // These message types use Address/Parity, i.e. our CRC syndrome is the sender's ICAO address.
         // We can't tell if the CRC is correct or not as we don't know the correct address.
         // Accept the message if it appears to be from a previously-seen aircraft
-        if (!icaoFilterTest(mm->crc))
+        if (!icaoFilterTest(mm->crc)) {
+            fprintf(stderr, "reject: AP doesn't match known ICAO\n");
             return -1;
+        }
         mm->addr = mm->crc;
         break;
 
@@ -490,34 +500,51 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
 
         mm->iid   =  mm->crc & 0x7f;
         if (mm->crc & 0xffff80) {
-            int pos1, pos2;
-            mm->correctedbits = modesChecksumDiagnose(mm->crc & 0xffff80, mm->msgbits, &pos1, &pos2);
-            if (!mm->correctedbits)
+            int addr;
+            errorinfo *ei = modesChecksumDiagnose(mm->crc & 0xffff80, mm->msgbits);
+            if (!ei) {
+                fprintf(stderr, "reject: DF11 uncorrectable CRC error\n");
                 return -1; // couldn't fix it
-            modesChecksumFix(msg, pos1, pos2);
+            }
+            mm->correctedbits = ei->errors;
+            modesChecksumFix(msg, ei);
 
             // check whether the corrected message looks sensible
-            mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
-            if (!icaoFilterTest(mm->addr))
+            addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
+            if (!icaoFilterTest(addr)) {
+                fprintf(stderr, "reject: DF11 CRC error, repaired address doesn't match known ICAO\n");
                 return -1;
+            }
         }
         break;
 
-    case 17: // Extended squitter
-    case 18: // Extended squitter/non-transponder
-        // These message types use Parity/Interrogator, but are specified to set II=0
-        if (mm->crc != 0) {
-            int pos1, pos2;
-            mm->correctedbits = modesChecksumDiagnose(mm->crc, mm->msgbits, &pos1, &pos2);
-            if (!mm->correctedbits)
-                return -1; // couldn't fix it
-            modesChecksumFix(msg, pos1, pos2);
+    case 17:   // Extended squitter
+    case 18: { // Extended squitter/non-transponder
+        errorinfo *ei;
+        int addr1, addr2;
 
-            // check whether the corrected message looks sensible
-            mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
-            if (!icaoFilterTest(mm->addr))
-                return -1;
+        // These message types use Parity/Interrogator, but are specified to set II=0
+
+        if (mm->crc == 0)
+            break;  // all good
+
+        ei = modesChecksumDiagnose(mm->crc, mm->msgbits);
+        if (!ei) {
+            fprintf(stderr, "reject: DF17/18 uncorrectable CRC error\n");
+            return -1; // couldn't fix it
         }
+        mm->correctedbits = ei->errors;
+
+        addr1 = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
+        modesChecksumFix(msg, ei);
+        addr2 = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
+        
+        // if the corrections touched the address, better validate it
+        if (addr1 != addr2 && !icaoFilterTest(addr2)) {
+            fprintf(stderr, "reject: DF17/18 CRC corrected address, repaired address doesn't match known ICAO\n");
+            return -1;
+        }
+
         break;
         
     case 20: // Comm-B, altitude reply
@@ -543,16 +570,16 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
             break;
         }
 #endif
-        
+
+        fprintf(stderr, "reject: DF20/21 address doesn't match known ICAO\n");
         return -1; // no good
 
     default:
-        // All other message types, we don't know how to handle their CRCs.
+        // All other message types, we don't know how to handle their CRCs, give up
         return -1;
     }
 
-    // ok, message looks mostly OK so far.
-    // decode fields.
+    // decode the bulk of the message
 
     mm->bFlags = 0;
 
@@ -562,6 +589,8 @@ int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
         if (!mm->correctedbits && (mm->msgtype != 11 || mm->iid == 0)) {            
             // No CRC errors seen, and either it was an DF17/18 extended squitter
             // or a DF11 acquisition squitter with II = 0. We probably have the right address.
+
+            // NB this is the only place that adds addresses!
             icaoFilterAdd(mm->addr);
         }
     }

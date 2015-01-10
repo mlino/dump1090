@@ -101,7 +101,7 @@
 #define MODES_MSG_ENCODER_ERRS     3                          // Maximum number of encoding errors
 
 // When changing, change also fixBitErrors() and modesInitErrorTable() !!
-#define MODES_MAX_BITERRORS        2                          // Global max for fixable bit erros
+#define MODES_MAX_BITERRORS        6                          // Global max for fixable bit erros
 
 #define MODES_MAX_PHASE_STATS      10
 
@@ -472,10 +472,16 @@ int  decodeCPRrelative  (struct aircraft *a, int fflag, int surface);
 int modesMessageLenByType(int type);
 
 // From crc.c:
+typedef struct {
+    uint32_t syndrome;                 // CRC syndrome
+    int      errors;                   // number of errors
+    int8_t   bit[MODES_MAX_BITERRORS]; // bit positions to fix (-1 = no bit)
+} errorinfo;
+
 void modesChecksumInit();
-uint32_t modesChecksum(uint8_t *msg, int bits);
-int modesChecksumDiagnose(uint32_t syndrome, int bits, int *pos1, int *pos2);
-void modesChecksumFix(uint8_t *msg, int pos1, int pos2);
+uint32_t modesChecksum(uint8_t *msg, int bitlen);
+errorinfo *modesChecksumDiagnose(uint32_t syndrome, int bitlen);
+void modesChecksumFix(uint8_t *msg, errorinfo *info);
 
 // From icao_bloom.c:
 void icaoFilterInit();

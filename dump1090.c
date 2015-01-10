@@ -544,7 +544,7 @@ static void display_demod_stats(const char *prefix, struct demod_stats *dstats) 
     printf("%d %swith bad crc\n",                               dstats->badcrc, prefix);
     printf("%d %serrors corrected\n",                           dstats->fixed, prefix);
 
-    for (j = 0;  j < MODES_MAX_BITERRORS;  j++) {
+    for (j = 0;  j < Modes.nfix_crc;  j++) {
         printf("   %d %swith %d bit %s\n", dstats->bit_fix[j], prefix, j+1, (j==0)?"error":"errors");
     }
 }
@@ -764,7 +764,8 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[j],"--ifile") && more) {
             Modes.filename = strdup(argv[++j]);
         } else if (!strcmp(argv[j],"--fix")) {
-            Modes.nfix_crc = 1;
+            if (!Modes.nfix_crc)
+                Modes.nfix_crc = 1;
         } else if (!strcmp(argv[j],"--no-fix")) {
             Modes.nfix_crc = 0;
         } else if (!strcmp(argv[j],"--no-crc-check")) {
@@ -816,7 +817,13 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[j],"--metric")) {
             Modes.metric = 1;
         } else if (!strcmp(argv[j],"--aggressive")) {
-            Modes.nfix_crc = MODES_MAX_BITERRORS;
+            if (Modes.nfix_crc < 2)
+                Modes.nfix_crc = 2;
+            else
+                Modes.nfix_crc++;
+
+            if (Modes.nfix_crc > MODES_MAX_BITERRORS)
+                Modes.nfix_crc = MODES_MAX_BITERRORS;
         } else if (!strcmp(argv[j],"--interactive")) {
             Modes.interactive = 1;
         } else if (!strcmp(argv[j],"--interactive-rows") && more) {

@@ -121,20 +121,45 @@ uint32_t modesChecksum(unsigned char *msg, int bits) {
 // instead of running through all possible bit positions (resp. pairs of
 // bit positions).
 //
-struct errorinfo {
-    uint32_t syndrome;                 // CRC syndrome
-    int8_t   bit1, bit2;               // bit positions to fix (-1 = no bit)
-};
 
-#define NERRORINFO \
-        (MODES_LONG_MSG_BITS+MODES_LONG_MSG_BITS*(MODES_LONG_MSG_BITS-1)/2)
-static struct errorinfo bitErrorTable[NERRORINFO];
-static int bitErrorTableSize;
+static errorinfo *bitErrorTable_short;
+static int bitErrorTableSize_short;
+
+static errorinfo *bitErrorTable_long;
+static int bitErrorTableSize_long;
+
+static int prepareSubtable(errorinfo *table, int n, int maxsize, int offset, int startbit, int endbit, errorinfo *base_entry, int error_bit)
+{
+    int i = 0;
+
+    if (error_bit >= Modes.nfix_crc)
+        return n;
+
+    for (i = startbit; i < endbit; ++i) {
+        assert(n < maxsize);
+
+        table[n] = *base_entry;
+        if (endbit - i <= 24) {
+            // trailing 24 bits are checksum bits
+            table[n].syndrome ^= 1 << (endbit - i - 1);
+        } else {
+            // data bits
+            table[n].syndrome ^= modes_checksum_table[i + offset];
+        }
+        table[n].errors = error_bit+1;
+        table[n].bit[error_bit] = i;
+        
+        ++n;
+        n = prepareSubtable(table, n, maxsize, offset, i + 1, endbit, &table[n-1], error_bit + 1);
+    }
+
+    return n;
+}
 
 // Compare function as needed for stdlib's qsort and bsearch functions
 static int cmpErrorInfo(const void *p0, const void *p1) {
-    struct errorinfo *e0 = (struct errorinfo*)p0;
-    struct errorinfo *e1 = (struct errorinfo*)p1;
+    errorinfo *e0 = (errorinfo*)p0;
+    errorinfo *e1 = (errorinfo*)p1;
     if (e0->syndrome == e1->syndrome) {
         return 0;
     } else if (e0->syndrome < e1->syndrome) {
@@ -143,105 +168,200 @@ static int cmpErrorInfo(const void *p0, const void *p1) {
         return 1;
     }
 }
+
+// (n k), the number of ways of selecting k distinct items from a set of n items
+static int combinations(int n, int k) {
+    int result = 1, i;
+
+    if (k == 0 || k == n)
+        return 1;
+
+    if (k > n)
+        return 0;
+
+    for (i = 1; i <= k; ++i) {
+        result = result * n / i;
+        n = n - 1;
+    }
+
+    return result;
+}
+
+static errorinfo *prepareErrorTable(int bits, int *size_out)
+{
+    int maxsize, usedsize;
+    errorinfo *table;
+    errorinfo base_entry;
+    uint32_t last;
+    int i;
+
+    assert (bits >= 0 && bits <= 112);
+    assert (Modes.nfix_crc >=0 && Modes.nfix_crc <= MODES_MAX_BITERRORS);
+
+    if (!Modes.nfix_crc) {
+        *size_out = 0;
+        return NULL;
+    }
+
+    maxsize = 0;
+    for (i = 1; i <= Modes.nfix_crc; ++i) {
+        maxsize += combinations(bits - 5, i); // space needed for all i-bit errors
+    }
+
+#ifdef CRCDEBUG    
+    fprintf(stderr, "Preparing syndrome table for up to %d-bit errors in a %d-bit message (max %d entries)\n", Modes.nfix_crc, bits, maxsize);
+#endif
+
+    table = malloc(maxsize * sizeof(errorinfo));
+    base_entry.syndrome = 0;
+    base_entry.errors = 0;
+    for (i = 0; i < MODES_MAX_BITERRORS; ++i)
+        base_entry.bit[i] = -1;
+
+    // ignore the first 5 bits (DF type)
+    usedsize = prepareSubtable(table, 0, maxsize, 112 - bits, 5, bits, &base_entry, 0);
+
+#ifdef CRCDEBUG    
+    fprintf(stderr, "Sorting syndromes..\n");
+#endif
+
+    qsort(table, usedsize, sizeof(errorinfo), cmpErrorInfo);
+
+    // Handle ambiguous cases, where there is more than one possible error pattern
+    // that produces a given syndrome (this happens with >2 bit errors). The ambiguous
+    // cases are set to 0xffffffff which sorts above all valid syndromes, so we can
+    // re-sort the table to move them to the end, then shrink the table to remove them.
+
+#ifdef CRCDEBUG    
+    fprintf(stderr, "Finding collisions..\n");
+#endif
+    last = table[0].syndrome;
+    for (i = 1; i < usedsize; ++i) {
+        if (table[i].syndrome == last) {
+            table[i-1].syndrome = 0xffffffff;
+            table[i].syndrome = 0xffffffff;
+        } else {
+            last = table[i].syndrome;
+        }
+    }
+
+    // Resort the table and trim it down
+#ifdef CRCDEBUG    
+    fprintf(stderr, "Sorting syndromes again..\n");
+#endif
+    qsort(table, usedsize, sizeof(errorinfo), cmpErrorInfo);
+
+#ifdef CRCDEBUG    
+    fprintf(stderr, "Trimming table..\n");
+#endif
+    for (i = usedsize; i > 0; --i) {
+        if (table[i-1].syndrome != 0xffffffff)
+            break;
+    }
+
+    if (i < usedsize) {
+#ifdef CRCDEBUG
+        fprintf(stderr, "Discarding %d collisions..\n", usedsize - i);
+#endif
+        table = realloc(table, i * sizeof(errorinfo));
+        usedsize = i;
+    }
+    
+    *size_out = usedsize;
+    
+#ifdef CRCDEBUG
+    {
+        // Check the table.
+        unsigned char *msg = malloc(bits/8);
+
+        for (i = 0; i < usedsize; ++i) {
+            int j;
+            errorinfo *ei;
+            uint32_t result;
+
+            memset(msg, 0, bits/8);
+            ei = &table[i];
+            for (j = 0; j < ei->errors; ++j) {
+                msg[ei->bit[j] >> 3] ^= 1 << (7 - (ei->bit[j]&7));
+            }
+
+            result = modesChecksum(msg, bits);
+            if (result != ei->syndrome) {
+                fprintf(stderr, "PROBLEM: entry %6d/%6d  syndrome %06x  errors %d  bits ", i, usedsize, ei->syndrome, ei->errors);
+                for (j = 0; j < ei->errors; ++j)
+                    fprintf(stderr, "%3d ", ei->bit[j]);
+                fprintf(stderr, " checksum %06x\n", result);
+            }
+        }
+
+        free(msg);
+    }        
+    
+    {
+        // Show the table stats
+        fprintf(stderr, "Syndrome table summary:\n");
+        for (i = 1; i <= Modes.nfix_crc; ++i) {
+            int j, count, possible;
+            
+            count = 0;
+            for (j = 0; j < usedsize; ++j) 
+                if (table[j].errors == i)
+                    ++count;
+
+            possible = combinations(bits-5, i);
+            fprintf(stderr, "  %d entries for %d-bit errors (%d possible, %d%% coverage)\n", count, i, possible, 100 * count / possible);
+        }
+
+        fprintf(stderr, "  %d entries total\n", usedsize);
+    }
+#endif
+
+    return table;
+}
+
 //
 //=========================================================================
 //
 // Compute the table of all syndromes for 1-bit and 2-bit error vectors
 void modesChecksumInit() {
-    unsigned char msg[MODES_LONG_MSG_BYTES];
-    int i, j, n;
-    uint32_t crc;
-
     if (!Modes.nfix_crc) {
-        bitErrorTableSize = 0;
+        bitErrorTable_short = bitErrorTable_long = NULL;
+        bitErrorTableSize_short = bitErrorTableSize_long = 0;
         return;
-    }        
-
-    n = 0;
-    memset(bitErrorTable, 0, sizeof(bitErrorTable));
-    memset(msg, 0, MODES_LONG_MSG_BYTES);
-
-
-    // Add all possible single and double bit errors
-    // don't include errors in first 5 bits (DF type)
-    for (i = 5;  i < MODES_LONG_MSG_BITS;  i++) {
-        int bytepos0 = (i >> 3);
-        int mask0 = 1 << (7 - (i & 7));
-
-        assert(n < NERRORINFO);
-
-        msg[bytepos0] ^= mask0;          // create error0
-        crc = modesChecksum(msg, MODES_LONG_MSG_BITS);
-        bitErrorTable[n].syndrome = crc;      // single bit error case
-        bitErrorTable[n].bit1 = i;
-        bitErrorTable[n].bit2 = -1;
-        ++n;
-
-        if (Modes.nfix_crc > 1) {
-            for (j = i+1;  j < MODES_LONG_MSG_BITS;  j++) {
-                int bytepos1 = (j >> 3);
-                int mask1 = 1 << (7 - (j & 7));
-
-                assert(n < NERRORINFO);
-
-                msg[bytepos1] ^= mask1;  // create error1
-                crc = modesChecksum(msg, MODES_LONG_MSG_BITS);
-                bitErrorTable[n].syndrome = crc; // two bit error case
-                bitErrorTable[n].bit1 = i;
-                bitErrorTable[n].bit2 = j;
-                ++n;
-
-                msg[bytepos1] ^= mask1;  // revert error1
-            }
-        }
-
-        msg[bytepos0] ^= mask0;          // revert error0
     }
 
-    bitErrorTableSize = n;
-    qsort(bitErrorTable, bitErrorTableSize, sizeof(struct errorinfo), cmpErrorInfo);
+    bitErrorTable_short = prepareErrorTable(MODES_SHORT_MSG_BITS, &bitErrorTableSize_short);
+    bitErrorTable_long = prepareErrorTable(MODES_LONG_MSG_BITS, &bitErrorTableSize_long);
 }
 
-int modesChecksumDiagnose(uint32_t syndrome, int bits, int *pos1, int *pos2)
+errorinfo *modesChecksumDiagnose(uint32_t syndrome, int bitlen)
 {
-    struct errorinfo *pei;
-    struct errorinfo ei;
-    int offset;
-    
-    *pos1 = -1;
-    *pos2 = -1;
+    errorinfo *table;
+    int tablesize;
+
+    errorinfo ei;
 
     if (syndrome == 0)
-        return 0; // no errors
+        return NULL; // no errors
 
     if (!Modes.nfix_crc)
-        return 0; // CRC fixes not enabled
+        return NULL; // CRC fixes not enabled
+
+    assert (bitlen == 56 || bitlen == 112);
+    if (bitlen == 56) { table = bitErrorTable_short; tablesize = bitErrorTableSize_short; }
+    else { table = bitErrorTable_long; tablesize = bitErrorTableSize_long; }
 
     ei.syndrome = syndrome;
-    pei = bsearch(&ei, bitErrorTable, bitErrorTableSize,
-                  sizeof(struct errorinfo), cmpErrorInfo);
-
-    if (pei == NULL)
-        return 0; // No syndrome found, not fixable
-
-    // Check that all bit positions lie inside the message length
-    offset = MODES_LONG_MSG_BITS-bits;
-
-    if (pei->bit1 < offset)                     // first bit out of range
-        return 0;
-    if (pei->bit2 != -1 && pei->bit2 < offset)  // second bit out of range
-        return 0;
-
-    *pos1 = pei->bit1;
-    *pos2 = pei->bit2;
-
-    return (pei->bit2 == -1) ? 1 : 2;
+    return bsearch(&ei, table, tablesize, sizeof(errorinfo), cmpErrorInfo);
 }
 
-void modesChecksumFix(uint8_t *msg, int pos1, int pos2)
+void modesChecksumFix(uint8_t *msg, errorinfo *info)
 {
-    if (pos1 != -1)
-        msg[pos1 >> 3] ^= 1 << (7 - (pos1 & 7));
-    if (pos2 != -1)
-        msg[pos2 >> 3] ^= 1 << (7 - (pos2 & 7));
+    int i;
+
+    if (!info)
+        return;
+
+    for (i = 0; i < info->errors; ++i)
+        msg[info->bit[i] >> 3] ^= 1 << (7 - (info->bit[i] & 7));
 }
