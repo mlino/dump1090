@@ -364,7 +364,7 @@ int ModeAToModeC(unsigned int ModeA)
 //=========================================================================
 //
 void decodeModeAMessage(struct modesMessage *mm, int ModeA)
-  {
+{
   mm->msgtype = 32; // Valid Mode S DF's are DF-00 to DF-31.
                     // so use 32 to indicate Mode A/C
 
@@ -385,9 +385,8 @@ void decodeModeAMessage(struct modesMessage *mm, int ModeA)
 
   // Not much else we can tell from a Mode A/C reply.
   // Just fudge up a few bits to keep other code happy
-  mm->crcok = 1;
   mm->correctedbits = 0;
-  }
+}
 //
 // ===================== Mode A/C detection and decoding  ===================
 //

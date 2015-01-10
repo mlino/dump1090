@@ -19,13 +19,13 @@ CC=gcc
 all: dump1090 view1090
 
 %.o: %.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(EXTRACFLAGS) -c $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(EXTRACFLAGS) -c $< -o $@
 
-dump1090: dump1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o
-	$(CC) -g -o dump1090 dump1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o $(LIBS) $(LIBS_RTL) $(LDFLAGS)
+dump1090: dump1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filter.o crc.o twopointfour.o
+	$(CC) -g -o $@ $^ $(LIBS) $(LIBS_RTL) $(LDFLAGS)
 
-view1090: view1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o
-	$(CC) -g -o view1090 view1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o $(LIBS) $(LDFLAGS)
+view1090: view1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filter.o crc.o
+	$(CC) -g -o $@ $^ $(LIBS) $(LDFLAGS)
 
 clean:
 	rm -f *.o dump1090 view1090

@@ -126,7 +126,8 @@ void view1090Init(void) {
     }
 
     // Prepare error correction tables
-    modesInitErrorInfo();
+    modesChecksumInit();
+    icaoFilterInit();
 }
 
 // Set up data connection

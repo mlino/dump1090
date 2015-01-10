@@ -32,65 +32,6 @@
 //
 // ===================== Mode S detection and decoding  ===================
 //
-// Parity table for MODE S Messages.
-// The table contains 112 elements, every element corresponds to a bit set
-// in the message, starting from the first bit of actual data after the
-// preamble.
-//
-// For messages of 112 bit, the whole table is used.
-// For messages of 56 bits only the last 56 elements are used.
-//
-// The algorithm is as simple as xoring all the elements in this table
-// for which the corresponding bit on the message is set to 1.
-//
-// The latest 24 elements in this table are set to 0 as the checksum at the
-// end of the message should not affect the computation.
-//
-// Note: this function can be used with DF11 and DF17, other modes have
-// the CRC xored with the sender address as they are reply to interrogations,
-// but a casual listener can't split the address from the checksum.
-//
-uint32_t modes_checksum_table[112] = {
-0x3935ea, 0x1c9af5, 0xf1b77e, 0x78dbbf, 0xc397db, 0x9e31e9, 0xb0e2f0, 0x587178,
-0x2c38bc, 0x161c5e, 0x0b0e2f, 0xfa7d13, 0x82c48d, 0xbe9842, 0x5f4c21, 0xd05c14,
-0x682e0a, 0x341705, 0xe5f186, 0x72f8c3, 0xc68665, 0x9cb936, 0x4e5c9b, 0xd8d449,
-0x939020, 0x49c810, 0x24e408, 0x127204, 0x093902, 0x049c81, 0xfdb444, 0x7eda22,
-0x3f6d11, 0xe04c8c, 0x702646, 0x381323, 0xe3f395, 0x8e03ce, 0x4701e7, 0xdc7af7,
-0x91c77f, 0xb719bb, 0xa476d9, 0xadc168, 0x56e0b4, 0x2b705a, 0x15b82d, 0xf52612,
-0x7a9309, 0xc2b380, 0x6159c0, 0x30ace0, 0x185670, 0x0c2b38, 0x06159c, 0x030ace,
-0x018567, 0xff38b7, 0x80665f, 0xbfc92b, 0xa01e91, 0xaff54c, 0x57faa6, 0x2bfd53,
-0xea04ad, 0x8af852, 0x457c29, 0xdd4410, 0x6ea208, 0x375104, 0x1ba882, 0x0dd441,
-0xf91024, 0x7c8812, 0x3e4409, 0xe0d800, 0x706c00, 0x383600, 0x1c1b00, 0x0e0d80,
-0x0706c0, 0x038360, 0x01c1b0, 0x00e0d8, 0x00706c, 0x003836, 0x001c1b, 0xfff409,
-0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000,
-0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000,
-0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000, 0x000000
-};
-
-uint32_t modesChecksum(unsigned char *msg, int bits) {
-    uint32_t   crc = 0;
-    uint32_t   rem = 0;
-    int        offset = (bits == 112) ? 0 : (112-56);
-    uint8_t    theByte = *msg;
-    uint32_t * pCRCTable = &modes_checksum_table[offset];
-    int j;
-
-    // We don't really need to include the checksum itself
-    bits -= 24;
-    for(j = 0; j < bits; j++) {
-        if ((j & 7) == 0)
-            theByte = *msg++;
-
-        // If bit is set, xor with corresponding table entry.
-        if (theByte & 0x80) {crc ^= *pCRCTable;} 
-        pCRCTable++;
-        theByte = theByte << 1; 
-    }
-
-    rem = (msg[0] << 16) | (msg[1] << 8) | msg[2]; // message checksum
-    return ((crc ^ rem) & 0x00FFFFFF); // 24 bit checksum syndrome.
-}
-//
 //=========================================================================
 //
 // Given the Downlink Format (DF) of the message, return the message length in bits.
@@ -102,240 +43,7 @@ uint32_t modesChecksum(unsigned char *msg, int bits) {
 int modesMessageLenByType(int type) {
     return (type & 0x10) ? MODES_LONG_MSG_BITS : MODES_SHORT_MSG_BITS ;
 }
-//
-//=========================================================================
-//
-// Try to fix single bit errors using the checksum. On success modifies
-// the original buffer with the fixed version, and returns the position
-// of the error bit. Otherwise if fixing failed -1 is returned.
-/*
-int fixSingleBitErrors(unsigned char *msg, int bits) {
-    int j;
-    unsigned char aux[MODES_LONG_MSG_BYTES];
 
-    memcpy(aux, msg, bits/8);
-
-    // Do not attempt to error correct Bits 0-4. These contain the DF, and must
-    // be correct because we can only error correct DF17
-    for (j = 5; j < bits; j++) {
-        int byte    = j/8;
-        int bitmask = 1 << (7 - (j & 7));
-
-        aux[byte] ^= bitmask; // Flip j-th bit
-
-        if (0 == modesChecksum(aux, bits)) {
-            // The error is fixed. Overwrite the original buffer with the 
-            // corrected sequence, and returns the error bit position
-            msg[byte] = aux[byte];
-            return (j);
-        }
-
-        aux[byte] ^= bitmask; // Flip j-th bit back again
-    }
-    return (-1);
-}
-*/
-//=========================================================================
-//
-// Similar to fixSingleBitErrors() but try every possible two bit combination.
-// This is very slow and should be tried only against DF17 messages that
-// don't pass the checksum, and only in Aggressive Mode.
-/*
-int fixTwoBitsErrors(unsigned char *msg, int bits) {
-    int j, i;
-    unsigned char aux[MODES_LONG_MSG_BYTES];
-
-    memcpy(aux, msg, bits/8);
-
-    // Do not attempt to error correct Bits 0-4. These contain the DF, and must
-    // be correct because we can only error correct DF17
-    for (j = 5; j < bits; j++) {
-        int byte1    = j/8;
-        int bitmask1 = 1 << (7 - (j & 7));
-        aux[byte1] ^= bitmask1; // Flip j-th bit
-
-        // Don't check the same pairs multiple times, so i starts from j+1
-        for (i = j+1; i < bits; i++) {
-            int byte2    = i/8;
-            int bitmask2 = 1 << (7 - (i & 7));
-
-            aux[byte2] ^= bitmask2; // Flip i-th bit
-
-            if (0 == modesChecksum(aux, bits)) {
-                // The error is fixed. Overwrite the original buffer with
-                // the corrected sequence, and returns the error bit position
-                msg[byte1] = aux[byte1];
-                msg[byte2] = aux[byte2];
-
-                // We return the two bits as a 16 bit integer by shifting
-                // 'i' on the left. This is possible since 'i' will always
-                // be non-zero because i starts from j+1
-                return (j | (i << 8));
-
-            aux[byte2] ^= bitmask2; // Flip i-th bit back
-            }
-
-        aux[byte1] ^= bitmask1; // Flip j-th bit back
-        }
-    }
-    return (-1);
-}
-*/
-//
-//=========================================================================
-//
-// Code for introducing a less CPU-intensive method of correcting
-// single bit errors.
-//
-// Makes use of the fact that the crc checksum is linear with respect to
-// the bitwise xor operation, i.e.
-//      crc(m^e) = (crc(m)^crc(e)
-// where m and e are the message resp. error bit vectors.
-//
-// Call crc(e) the syndrome.
-//
-// The code below works by precomputing a table of (crc(e), e) for all
-// possible error vectors e (here only single bit and double bit errors),
-// search for the syndrome in the table, and correct the then known error.
-// The error vector e is represented by one or two bit positions that are
-// changed. If a second bit position is not used, it is -1.
-//
-// Run-time is binary search in a sorted table, plus some constant overhead,
-// instead of running through all possible bit positions (resp. pairs of
-// bit positions).
-//
-struct errorinfo {
-    uint32_t syndrome;                 // CRC syndrome
-    int      bits;                     // Number of bit positions to fix
-    int      pos[MODES_MAX_BITERRORS]; // Bit positions corrected by this syndrome
-};
-
-#define NERRORINFO \
-        (MODES_LONG_MSG_BITS+MODES_LONG_MSG_BITS*(MODES_LONG_MSG_BITS-1)/2)
-struct errorinfo bitErrorTable[NERRORINFO];
-
-// Compare function as needed for stdlib's qsort and bsearch functions
-int cmpErrorInfo(const void *p0, const void *p1) {
-    struct errorinfo *e0 = (struct errorinfo*)p0;
-    struct errorinfo *e1 = (struct errorinfo*)p1;
-    if (e0->syndrome == e1->syndrome) {
-        return 0;
-    } else if (e0->syndrome < e1->syndrome) {
-        return -1;
-    } else {
-        return 1;
-    }
-}
-//
-//=========================================================================
-//
-// Compute the table of all syndromes for 1-bit and 2-bit error vectors
-void modesInitErrorInfo() {
-    unsigned char msg[MODES_LONG_MSG_BYTES];
-    int i, j, n;
-    uint32_t crc;
-    n = 0;
-    memset(bitErrorTable, 0, sizeof(bitErrorTable));
-    memset(msg, 0, MODES_LONG_MSG_BYTES);
-    // Add all possible single and double bit errors
-    // don't include errors in first 5 bits (DF type)
-    for (i = 5;  i < MODES_LONG_MSG_BITS;  i++) {
-        int bytepos0 = (i >> 3);
-        int mask0 = 1 << (7 - (i & 7));
-        msg[bytepos0] ^= mask0;          // create error0
-        crc = modesChecksum(msg, MODES_LONG_MSG_BITS);
-        bitErrorTable[n].syndrome = crc;      // single bit error case
-        bitErrorTable[n].bits = 1;
-        bitErrorTable[n].pos[0] = i;
-        bitErrorTable[n].pos[1] = -1;
-        n += 1;
-
-        if (Modes.nfix_crc > 1) {
-            for (j = i+1;  j < MODES_LONG_MSG_BITS;  j++) {
-                int bytepos1 = (j >> 3);
-                int mask1 = 1 << (7 - (j & 7));
-                msg[bytepos1] ^= mask1;  // create error1
-                crc = modesChecksum(msg, MODES_LONG_MSG_BITS);
-                if (n >= NERRORINFO) {
-                    //fprintf(stderr, "Internal error, too many entries, fix NERRORINFO\n");
-                    break;
-                }
-                bitErrorTable[n].syndrome = crc; // two bit error case
-                bitErrorTable[n].bits = 2;
-                bitErrorTable[n].pos[0] = i;
-                bitErrorTable[n].pos[1] = j;
-                n += 1;
-                msg[bytepos1] ^= mask1;  // revert error1
-            }
-        }
-        msg[bytepos0] ^= mask0;          // revert error0
-    }
-    qsort(bitErrorTable, NERRORINFO, sizeof(struct errorinfo), cmpErrorInfo);
-
-    // Test code: report if any syndrome appears at least twice. In this
-    // case the correction cannot be done without ambiguity.
-    // Tried it, does not happen for 1- and 2-bit errors. 
-    /*
-    for (i = 1;  i < NERRORINFO;  i++) {
-        if (bitErrorTable[i-1].syndrome == bitErrorTable[i].syndrome) {
-            fprintf(stderr, "modesInitErrorInfo: Collision for syndrome %06x\n",
-                            (int)bitErrorTable[i].syndrome);
-        }
-    }
-
-    for (i = 0;  i < NERRORINFO;  i++) {
-        printf("syndrome %06x    bit0 %3d    bit1 %3d\n",
-               bitErrorTable[i].syndrome,
-               bitErrorTable[i].pos0, bitErrorTable[i].pos1);
-    }
-    */
-}
-//
-//=========================================================================
-//
-// Search for syndrome in table and if an entry is found, flip the necessary
-// bits. Make sure the indices fit into the array
-// Additional parameter: fix only less than maxcorrected bits, and record
-// fixed bit positions in corrected[]. This array can be NULL, otherwise
-// must be of length at least maxcorrected.
-// Return number of fixed bits.
-//
-int fixBitErrors(unsigned char *msg, int bits, int maxfix, char *fixedbits) {
-    struct errorinfo *pei;
-    struct errorinfo ei;
-    int bitpos, offset, res, i;
-    memset(&ei, 0, sizeof(struct errorinfo));
-    ei.syndrome = modesChecksum(msg, bits);
-    pei = bsearch(&ei, bitErrorTable, NERRORINFO,
-                  sizeof(struct errorinfo), cmpErrorInfo);
-    if (pei == NULL) {
-        return 0; // No syndrome found
-    }
-
-    // Check if the syndrome fixes more bits than we allow
-    if (maxfix < pei->bits) {
-        return 0;
-    }
-
-    // Check that all bit positions lie inside the message length
-    offset = MODES_LONG_MSG_BITS-bits;
-    for (i = 0;  i < pei->bits;  i++) {
-	    bitpos = pei->pos[i] - offset;
-	    if ((bitpos < 0) || (bitpos >= bits)) {
-		    return 0;
-	    }
-    }
-
-    // Fix the bits
-    for (i = res = 0;  i < pei->bits;  i++) {
-	    bitpos = pei->pos[i] - offset;
-	    msg[bitpos >> 3] ^= (1 << (7 - (bitpos & 7)));
-	    if (fixedbits) {
-		    fixedbits[res++] = bitpos;
-	    }
-    }
-    return res;
-}
 //
 // ============================== Debugging =================================
 //
@@ -388,39 +96,7 @@ void dumpMagnitudeVector(uint16_t *m, uint32_t offset) {
         dumpMagnitudeBar(j-offset, m[j]);
     }
 }
-//
-//=========================================================================
-//
-// Produce a raw representation of the message as a Javascript file
-// loadable by debug.html.
-//
-void dumpRawMessageJS(char *descr, unsigned char *msg,
-                      uint16_t *m, uint32_t offset, int fixable, char *bitpos)
-{
-    int padding = 5; // Show a few samples before the actual start.
-    int start = offset - padding;
-    int end = offset + (MODES_PREAMBLE_SAMPLES)+(MODES_LONG_MSG_SAMPLES) - 1;
-    FILE *fp;
-    int j;
 
-    MODES_NOTUSED(fixable);
-    if ((fp = fopen("frames.js","a")) == NULL) {
-        fprintf(stderr, "Error opening frames.js: %s\n", strerror(errno));
-        exit(1);
-    }
-
-    fprintf(fp,"frames.push({\"descr\": \"%s\", \"mag\": [", descr);
-    for (j = start; j <= end; j++) {
-        fprintf(fp,"%d", j < 0 ? 0 : m[j]);
-        if (j != end) fprintf(fp,",");
-    }
-    fprintf(fp,"], \"fix1\": %d, \"fix2\": %d, \"bits\": %d, \"hex\": \"",
-	    bitpos[0], bitpos[1] , modesMessageLenByType(msg[0]>>3));
-    for (j = 0; j < MODES_LONG_MSG_BYTES; j++)
-        fprintf(fp,"\\x%02x",msg[j]);
-    fprintf(fp,"\"});\n");
-    fclose(fp);
-}
 //
 //=========================================================================
 //
@@ -440,18 +116,12 @@ void dumpRawMessage(char *descr, unsigned char *msg, uint16_t *m, uint32_t offse
     int  j;
     int  msgtype = msg[0] >> 3;
     int  fixable = 0;
-    char bitpos[MODES_MAX_BITERRORS];
+    int pos1, pos2;
 
-    for (j = 0;  j < MODES_MAX_BITERRORS;  j++) {
-        bitpos[j] = -1;
-    }
     if (msgtype == 17) {
-        fixable = fixBitErrors(msg, MODES_LONG_MSG_BITS, MODES_MAX_BITERRORS, bitpos);
-    }
-
-    if (Modes.debug & MODES_DEBUG_JS) {
-        dumpRawMessageJS(descr, msg, m, offset, fixable, bitpos);
-        return;
+        int bits = modesMessageLenByType(msgtype);
+        int crc = modesChecksum(msg, bits);
+        fixable = modesChecksumDiagnose(crc, bits, &pos1, &pos2);
     }
 
     printf("\n--- %s\n    ", descr);
@@ -463,172 +133,7 @@ void dumpRawMessage(char *descr, unsigned char *msg, uint16_t *m, uint32_t offse
     dumpMagnitudeVector(m,offset);
     printf("---\n\n");
 }
-//
-//=========================================================================
-//
-// Code for testing the timing: run all possible 1- and 2-bit error 
-// the test message by all 1-bit errors. Run the old code against
-// all of them, and new the code.
-//
-// Example measurements:
-// Timing old vs. new crc correction code:
-//    Old code: 1-bit errors on 112 msgs: 3934 usecs
-//    New code: 1-bit errors on 112 msgs: 104 usecs
-//    Old code: 2-bit errors on 6216 msgs: 407743 usecs
-//    New code: 2-bit errors on 6216 msgs: 5176 usecs
-// indicating a 37-fold resp. 78-fold improvement in speed for 1-bit resp.
-// 2-bit error.
-/*
-unsigned char tmsg0[MODES_LONG_MSG_BYTES] = {
-        // Test data: first ADS-B message from testfiles/modes1.bin
-        0x8f, 0x4d, 0x20, 0x23, 0x58, 0x7f, 0x34, 0x5e,
-        0x35, 0x83, 0x7e, 0x22, 0x18, 0xb2
-};
-#define NTWOBITS (MODES_LONG_MSG_BITS*(MODES_LONG_MSG_BITS-1)/2)
-unsigned char tmsg1[MODES_LONG_MSG_BITS][MODES_LONG_MSG_BYTES];
-unsigned char tmsg2[NTWOBITS][MODES_LONG_MSG_BYTES];
-// Init an array of cloned messages with all possible 1-bit errors present,
-// applied to each message at the respective position
-//
-void inittmsg1() {
-        int i, bytepos, mask;
-        for (i = 0;  i < MODES_LONG_MSG_BITS;  i++) {
-                bytepos = i >> 3;
-                mask = 1 << (7 - (i & 7));
-                memcpy(&tmsg1[i][0], tmsg0, MODES_LONG_MSG_BYTES);
-                tmsg1[i][bytepos] ^= mask;
-        }
-}
 
-// Run sanity check on all but first 5 messages / bits, as those bits
-// are not corrected.
-//
-void checktmsg1(FILE *out) {
-        int i, k;
-        uint32_t crc;
-        for (i = 5;  i < MODES_LONG_MSG_BITS;  i++) {
-                crc = modesChecksum(&tmsg1[i][0], MODES_LONG_MSG_BITS);
-                if (crc != 0) {
-                        fprintf(out, "CRC not fixed for "
-                                "positon %d\n", i);
-                        fprintf(out, "  MSG ");
-                        for (k = 0;  k < MODES_LONG_MSG_BYTES;  k++) {
-                                fprintf(out, "%02x", tmsg1[i][k]);
-                        }
-                        fprintf(out, "\n");
-                }
-        }
-}
-
-void inittmsg2() {
-        int i, j, n, bytepos0, bytepos1, mask0, mask1;
-        n = 0;
-        for (i = 0;  i < MODES_LONG_MSG_BITS;  i++) {
-                bytepos0 = i >> 3;
-                mask0 = 1 << (7 - (i & 7));
-                for (j = i+1;  j < MODES_LONG_MSG_BITS;  j++) {
-                        bytepos1 = j >> 3;
-                        mask1 = 1 << (7 - (j & 7));
-                        memcpy(&tmsg2[n][0], tmsg0, MODES_LONG_MSG_BYTES);
-                        tmsg2[n][bytepos0] ^= mask0;
-                        tmsg2[n][bytepos1] ^= mask1;
-                        n += 1;
-                }
-        }
-}
-
-long difftvusec(struct timeval *t0, struct timeval *t1) {
-        long res = 0;
-        res = t1->tv_usec-t0->tv_usec;
-        res += (t1->tv_sec-t0->tv_sec)*1000000L;
-        return res;
-}
-
-// the actual test code
-void testAndTimeBitCorrection() {
-        struct timeval starttv, endtv;
-        int i;
-        // Run timing on 1-bit errors
-        printf("Timing old vs. new crc correction code:\n");
-        inittmsg1();
-        gettimeofday(&starttv, NULL);
-        for (i = 0;  i < MODES_LONG_MSG_BITS;  i++) {
-            fixSingleBitErrors(&tmsg1[i][0], MODES_LONG_MSG_BITS);
-        }
-        gettimeofday(&endtv, NULL);
-        printf("   Old code: 1-bit errors on %d msgs: %ld usecs\n",
-               MODES_LONG_MSG_BITS, difftvusec(&starttv, &endtv));
-        checktmsg1(stdout);
-        // Re-init
-        inittmsg1();
-        gettimeofday(&starttv, NULL);
-        for (i = 0;  i < MODES_LONG_MSG_BITS;  i++) {
-            fixBitErrors(&tmsg1[i][0], MODES_LONG_MSG_BITS, MODES_MAX_BITERRORS, NULL);
-        }
-        gettimeofday(&endtv, NULL);
-        printf("   New code: 1-bit errors on %d msgs: %ld usecs\n",
-               MODES_LONG_MSG_BITS, difftvusec(&starttv, &endtv));
-        checktmsg1(stdout);
-        // Run timing on 2-bit errors
-        inittmsg2();
-        gettimeofday(&starttv, NULL);
-        for (i = 0;  i < NTWOBITS;  i++) {
-            fixSingleBitErrors(&tmsg2[i][0], MODES_LONG_MSG_BITS);
-        }
-        gettimeofday(&endtv, NULL);
-        printf("   Old code: 2-bit errors on %d msgs: %ld usecs\n",
-               NTWOBITS, difftvusec(&starttv, &endtv));
-        // Re-init
-        inittmsg2();
-        gettimeofday(&starttv, NULL);
-        for (i = 0;  i < NTWOBITS;  i++) {
-            fixBitErrors(&tmsg2[i][0], MODES_LONG_MSG_BITS, MODES_MAX_BITERRORS, NULL);
-        }
-        gettimeofday(&endtv, NULL);
-        printf("   New code: 2-bit errors on %d msgs: %ld usecs\n",
-               NTWOBITS, difftvusec(&starttv, &endtv));
-}
-*/
-//=========================================================================
-//
-// Hash the ICAO address to index our cache of MODES_ICAO_CACHE_LEN
-// elements, that is assumed to be a power of two
-//
-uint32_t ICAOCacheHashAddress(uint32_t a) {
-    // The following three rounds wil make sure that every bit affects
-    // every output bit with ~ 50% of probability.
-    a = ((a >> 16) ^ a) * 0x45d9f3b;
-    a = ((a >> 16) ^ a) * 0x45d9f3b;
-    a = ((a >> 16) ^ a);
-    return a & (MODES_ICAO_CACHE_LEN-1);
-}
-//
-//=========================================================================
-//
-// Add the specified entry to the cache of recently seen ICAO addresses.
-// Note that we also add a timestamp so that we can make sure that the
-// entry is only valid for MODES_ICAO_CACHE_TTL seconds.
-//
-void addRecentlySeenICAOAddr(uint32_t addr) {
-    uint32_t h = ICAOCacheHashAddress(addr);
-    Modes.icao_cache[h*2] = addr;
-    Modes.icao_cache[h*2+1] = (uint32_t) time(NULL);
-}
-//
-//=========================================================================
-//
-// Returns 1 if the specified ICAO address was seen in a DF format with
-// proper checksum (not xored with address) no more than * MODES_ICAO_CACHE_TTL
-// seconds ago. Otherwise returns 0.
-//
-int ICAOAddressWasRecentlySeen(uint32_t addr) {
-    uint32_t h = ICAOCacheHashAddress(addr);
-    uint32_t a = Modes.icao_cache[h*2];
-    uint32_t t = Modes.icao_cache[h*2+1];
-    uint64_t tn = time(NULL);
-
-    return ( (a) && (a == addr) && ( (tn - t) <= MODES_ICAO_CACHE_TTL) );
-}
 //
 //=========================================================================
 //
@@ -746,14 +251,14 @@ int decodeMovementField(int movement) {
 //
 // Capability table
 char *ca_str[8] = {
-    /* 0 */ "Level 1 (Surveillance Only)",
-    /* 1 */ "Level 2 (DF0,4,5,11)",
-    /* 2 */ "Level 3 (DF0,4,5,11,20,21)",
-    /* 3 */ "Level 4 (DF0,4,5,11,20,21,24)",
-    /* 4 */ "Level 2+3+4 (DF0,4,5,11,20,21,24,code7 - is on ground)",
-    /* 5 */ "Level 2+3+4 (DF0,4,5,11,20,21,24,code7 - is airborne)",
-    /* 6 */ "Level 2+3+4 (DF0,4,5,11,20,21,24,code7)",
-    /* 7 */ "Level 7 ???"
+    /* 0 */ "Level 1",
+    /* 1 */ "reserved",
+    /* 2 */ "reserved",
+    /* 3 */ "reserved",
+    /* 4 */ "Level 2+, ground",
+    /* 5 */ "Level 2+, airborne",
+    /* 6 */ "Level 2+",
+    /* 7 */ "DR/Alert/SPI active"
 };
 
 // DF 18 Control field table.
@@ -776,8 +281,8 @@ char *fs_str[8] = {
     /* 3 */ "ALERT,  On the ground",
     /* 4 */ "ALERT & Special Position Identification. Airborne or Ground",
     /* 5 */ "Special Position Identification. Airborne or Ground",
-    /* 6 */ "Value 6 is not assigned",
-    /* 7 */ "Value 7 is not assigned"
+    /* 6 */ "Reserved",
+    /* 7 */ "Not assigned"
 };
 
 // Emergency state table
@@ -790,7 +295,7 @@ char *es_str[8] = {
     /* 3 */ "Minimum fuel",
     /* 4 */ "No communications (squawk 7600)",
     /* 5 */ "Unlawful interference (squawk 7500)",
-    /* 6 */ "Downed Aircraft",
+    /* 6 */ "Reserved",
     /* 7 */ "Reserved"
 };
 //
@@ -825,14 +330,132 @@ char *getMEDescription(int metype, int mesub) {
         mename = "Aircraft Operational Status Message";
     return mename;
 }
+
+// Score how plausible this ModeS message looks.
+//
+// <0        : decoding would fail
+// 500       : DF11 message with 2-bit error
+// 600       : AP/DP-type message (DF20/21), no testable CRC, but the syndrome matches a recently seen address after masking off the top byte
+// 750       : ES message with 2-bit error
+// 900       : DF11 message with IID!=0 and 1-bit error
+// 1000      : AP-type message (DF0/4/5/16/24), no testable CRC, but the syndrome matches a recently seen address
+// 1000      : AP/DP-type message (DF20/21), no testable CRC, but the syndrome matches a recently seen address
+// 1000      : DF11 message with IID=0 and 1-bit error
+// 1500      : DF11 message with IID!=0 and no errors
+// 2000      : DF11 message with IID=0 and no errors
+// 2000      : ES message with 1-bit error
+// 5000      : ES message with correct CRC
+int scoreModesMessage(unsigned char *msg) {
+    int msgtype = msg[0] >> 3; // Downlink Format
+    int msgbits = modesMessageLenByType(msgtype);
+    int crc     = modesChecksum(msg, msgbits);
+
+    //fprintf(stderr, "type %d len %d crc %04x\n", msgtype, msgbits, crc);
+
+    switch (msgtype) {
+    case 0: // short air-air surveillance
+    case 4: // surveillance, altitude reply
+    case 5: // surveillance, altitude reply
+    case 16: // long air-air surveillance
+    case 24: // Comm-D (ELM)
+        return icaoFilterTest(crc) ? 1000 : -1;
+
+    case 11: { // All-call reply
+        int pos1, pos2, iid, addr, fixedbits;
+
+        if (!crc)
+            return 2000;
+
+        iid = crc & 0x7f;
+        crc = crc & 0xffff80;
+
+        addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
+
+        if (!crc) {
+            if (!icaoFilterTest(addr))
+                return -1;            
+            return 1500;
+        }
+
+        fixedbits = modesChecksumDiagnose(crc, msgbits, &pos1, &pos2);
+        if (!fixedbits)
+            return -1; // can't correct errors
+        
+        {
+            // need to fix the message to test the address, so take a copy first
+            unsigned char msgcopy[MODES_SHORT_MSG_BYTES];
+            memcpy(msgcopy, msg, MODES_SHORT_MSG_BYTES);
+            modesChecksumFix(msgcopy, pos1, pos2);
+
+            addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
+            if (!icaoFilterTest(addr))
+                return -1;
+            else if (fixedbits == 2)
+                return 500;
+            else if (iid != 0)
+                return 750;
+            else
+                return 1000;
+        }
+    }
+        
+    case 17:   // Extended squitter
+    case 18: { // Extended squitter/non-transponder
+        int pos1, pos2, addr, fixedbits;
+
+        if (crc == 0)
+            return 5000;
+
+        fixedbits = modesChecksumDiagnose(crc, msgbits, &pos1, &pos2);
+        if (!fixedbits)
+            return -1; // can't correct errors
+        
+        {
+            // need to fix the message to test the address, so take a copy first
+            unsigned char msgcopy[MODES_LONG_MSG_BYTES];
+            memcpy(msgcopy, msg, MODES_LONG_MSG_BYTES);
+            modesChecksumFix(msgcopy, pos1, pos2);
+
+            addr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
+            if (!icaoFilterTest(addr))
+                return -1;
+            else if (fixedbits == 2)
+                return 750;
+            else
+                return 2000;
+        }
+    }
+
+    case 20:   // Comm-B, altitude reply
+    case 21:   // Comm-B, identity reply
+        if (icaoFilterTest(crc))
+            return 1000; // Address/Parity
+
+#if 0
+        if (icaoFilterTestFuzzy(crc))
+            return 600;  // Data/Parity
+#endif
+
+        return -1;
+
+    default:
+        // unknown message type
+        return -1;
+    }
+}
+
 //
 //=========================================================================
 //
 // Decode a raw Mode S message demodulated as a stream of bytes by detectModeS(), 
 // and split it into fields populating a modesMessage structure.
 //
-void decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
-    char *ais_charset = "?ABCDEFGHIJKLMNOPQRSTUVWXYZ????? ???????????????0123456789??????";
+
+static void decodeExtendedSquitter(struct modesMessage *mm);
+static void decodeCommB(struct modesMessage *mm);
+static char *ais_charset = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !\"#$%&'()*+,-./0123456789:;<=>?";
+
+int decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
 
     // Work on our local copy
     memcpy(mm->msg, msg, MODES_LONG_MSG_BYTES);
@@ -842,105 +465,109 @@ void decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
     mm->msgtype         = msg[0] >> 3; // Downlink Format
     mm->msgbits         = modesMessageLenByType(mm->msgtype);
     mm->crc             = modesChecksum(msg, mm->msgbits);
+    mm->correctedbits   = 0;
 
-    if ((mm->crc) && (Modes.nfix_crc) && ((mm->msgtype == 17) || (mm->msgtype == 18))) {
-//  if ((mm->crc) && (Modes.nfix_crc) && ((mm->msgtype == 11) || (mm->msgtype == 17))) {
+    switch (mm->msgtype) {
+    case 0: // short air-air surveillance
+    case 4: // surveillance, altitude reply
+    case 5: // surveillance, altitude reply
+    case 16: // long air-air surveillance
+    case 24: // Comm-D (ELM)
+        // These message types use Address/Parity, i.e. our CRC syndrome is the sender's ICAO address.
+        // We can't tell if the CRC is correct or not as we don't know the correct address.
+        // Accept the message if it appears to be from a previously-seen aircraft
+        if (!icaoFilterTest(mm->crc))
+            return -1;
+        mm->addr = mm->crc;
+        break;
+
+    case 11: // All-call reply
+        // This message type uses Parity/Interrogator, i.e. our CRC syndrome is CL + IC from the uplink message
+        // which we can't see. So we don't know if the CRC is correct or not.
         //
-        // Fixing single bit errors in DF-11 is a bit dodgy because we have no way to 
-        // know for sure if the crc is supposed to be 0 or not - it could be any value 
-        // less than 80. Therefore, attempting to fix DF-11 errors can result in a 
-        // multitude of possible crc solutions, only one of which is correct.
-        // 
-        // We should probably perform some sanity checks on corrected DF-11's before 
-        // using the results. Perhaps check the ICAO against known aircraft, and check
-        // IID against known good IID's. That's a TODO.
-        //
-        mm->correctedbits = fixBitErrors(msg, mm->msgbits, Modes.nfix_crc, mm->corrected);
+        // however! CL + IC only occupy the lower 7 bits of the CRC. So if we ignore those bits when testing
+        // the CRC we can still try to detect/correct errors.
 
-        // If we correct, validate ICAO addr to help filter birthday paradox solutions.
-        if (mm->correctedbits) {
-            uint32_t ulAddr = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
-            if (!ICAOAddressWasRecentlySeen(ulAddr))
-                mm->correctedbits = 0;
+        mm->iid   =  mm->crc & 0x7f;
+        if (mm->crc & 0xffff80) {
+            int pos1, pos2;
+            mm->correctedbits = modesChecksumDiagnose(mm->crc & 0xffff80, mm->msgbits, &pos1, &pos2);
+            if (!mm->correctedbits)
+                return -1; // couldn't fix it
+            modesChecksumFix(msg, pos1, pos2);
+
+            // check whether the corrected message looks sensible
+            mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
+            if (!icaoFilterTest(mm->addr))
+                return -1;
         }
-    }
-    //
-    // Note that most of the other computation happens *after* we fix the 
-    // single/two bit errors, otherwise we would need to recompute the fields again.
-    //
-    if (mm->msgtype == 11) { // DF 11
-        mm->iid   =  mm->crc;
-        mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
-        mm->ca    = (msg[0] & 0x07); // Responder capabilities
+        break;
 
-        if ((mm->crcok = (0 == mm->crc))) {
-            // DF 11 : if crc == 0 try to populate our ICAO addresses whitelist.
-            addRecentlySeenICAOAddr(mm->addr);
-        } else if (mm->crc < 80) {
-            mm->crcok = ICAOAddressWasRecentlySeen(mm->addr);
-            if (mm->crcok) {
-                addRecentlySeenICAOAddr(mm->addr);
-            }
+    case 17: // Extended squitter
+    case 18: // Extended squitter/non-transponder
+        // These message types use Parity/Interrogator, but are specified to set II=0
+        if (mm->crc != 0) {
+            int pos1, pos2;
+            mm->correctedbits = modesChecksumDiagnose(mm->crc, mm->msgbits, &pos1, &pos2);
+            if (!mm->correctedbits)
+                return -1; // couldn't fix it
+            modesChecksumFix(msg, pos1, pos2);
+
+            // check whether the corrected message looks sensible
+            mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
+            if (!icaoFilterTest(mm->addr))
+                return -1;
         }
+        break;
+        
+    case 20: // Comm-B, altitude reply
+    case 21: // Comm-B, identity reply
+        // These message types either use Address/Parity (see DF0 etc)
+        // or Data Parity where the requested BDS is also xored into the top byte.
+        // So not only do we not know whether the CRC is right, we also don't know if
+        // the ICAO is right! Ow.
 
-    } else if (mm->msgtype == 17) { // DF 17
-        mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
-        mm->ca    = (msg[0] & 0x07); // Responder capabilities
-
-        if ((mm->crcok = (0 == mm->crc))) {
-            // DF 17 : if crc == 0 try to populate our ICAO addresses whitelist.
-            addRecentlySeenICAOAddr(mm->addr);
-        }
-
-    } else if (mm->msgtype == 18) { // DF 18
-        mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]); 
-        mm->ca    = (msg[0] & 0x07); // Control Field
-
-        if ((mm->crcok = (0 == mm->crc))) {
-            // DF 18 : if crc == 0 try to populate our ICAO addresses whitelist.
-            addRecentlySeenICAOAddr(mm->addr);
+        // Try an exact match
+        if (icaoFilterTest(mm->crc)) {
+            // OK.
+            mm->addr = mm->crc;
+            mm->bds = 0; // unknown
+            break;
         }
 
-    } else { // All other DF's
-        // Compare the checksum with the whitelist of recently seen ICAO 
-        // addresses. If it matches one, then declare the message as valid
-        mm->crcok = ICAOAddressWasRecentlySeen(mm->addr = mm->crc);
-    }
-
-    // If we're checking CRC and the CRC is invalid, then we can't trust any 
-    // of the data contents, so save time and give up now.
-    if ((Modes.check_crc) && (!mm->crcok) && (!mm->correctedbits)) { return;}
-
-    // Fields for DF0, DF16
-    if (mm->msgtype == 0  || mm->msgtype == 16) {
-        if (msg[0] & 0x04) {                       // VS Bit
-            mm->bFlags |= MODES_ACFLAGS_AOG_VALID | MODES_ACFLAGS_AOG;
-        } else {
-            mm->bFlags |= MODES_ACFLAGS_AOG_VALID;
+#if 0
+        // Try a fuzzy match
+        if ( (mm->addr = icaoFilterTestFuzzy(mm->crc)) != 0) {
+            // We have an address that would match, assume it's correct
+            mm->bds = (mm->crc ^ mm->addr) >> 16; // derive the BDS value based on what we think the address is
+            break;
         }
+#endif
+        
+        return -1; // no good
+
+    default:
+        // All other message types, we don't know how to handle their CRCs.
+        return -1;
     }
 
-    // Fields for DF11, DF17
-    if (mm->msgtype == 11 || mm->msgtype == 17) {
-        if (mm->ca == 4) {
-            mm->bFlags |= MODES_ACFLAGS_AOG_VALID | MODES_ACFLAGS_AOG;
-        } else if (mm->ca == 5) {
-            mm->bFlags |= MODES_ACFLAGS_AOG_VALID;
-        }
-    }
-          
-    // Fields for DF5, DF21 = Gillham encoded Squawk
-    if (mm->msgtype == 5  || mm->msgtype == 21) {
-        int ID13Field = ((msg[2] << 8) | msg[3]) & 0x1FFF; 
-        if (ID13Field) {
-            mm->bFlags |= MODES_ACFLAGS_SQUAWK_VALID;
-            mm->modeA   = decodeID13Field(ID13Field);
+    // ok, message looks mostly OK so far.
+    // decode fields.
+
+    mm->bFlags = 0;
+
+    // AA (Address announced)
+    if (mm->msgtype == 11 || mm->msgtype == 17 || mm->msgtype == 18) {
+        mm->addr  = (msg[1] << 16) | (msg[2] << 8) | (msg[3]);
+        if (!mm->correctedbits && (mm->msgtype != 11 || mm->iid == 0)) {            
+            // No CRC errors seen, and either it was an DF17/18 extended squitter
+            // or a DF11 acquisition squitter with II = 0. We probably have the right address.
+            icaoFilterAdd(mm->addr);
         }
     }
 
-    // Fields for DF0, DF4, DF16, DF20 13 bit altitude
-    if (mm->msgtype == 0  || mm->msgtype == 4 ||
-        mm->msgtype == 16 || mm->msgtype == 20) {
+    // AC (Altitude Code)
+    if (mm->msgtype == 0 || mm->msgtype == 4 || mm->msgtype == 16 || mm->msgtype == 20) {
         int AC13Field = ((msg[2] << 8) | msg[3]) & 0x1FFF; 
         if (AC13Field) { // Only attempt to decode if a valid (non zero) altitude is present
             mm->bFlags  |= MODES_ACFLAGS_ALTITUDE_VALID;
@@ -948,192 +575,291 @@ void decodeModesMessage(struct modesMessage *mm, unsigned char *msg) {
         }
     }
 
-    // Fields for DF4, DF5, DF20, DF21
-    if ((mm->msgtype == 4) || (mm->msgtype == 20) ||
-        (mm->msgtype == 5) || (mm->msgtype == 21)) {
+    // AF (DF19 Application Field) not decoded
+
+    // CA (Capability)
+    if (mm->msgtype == 11 || mm->msgtype == 17) {
+        mm->ca    = (msg[0] & 0x07);
+        if (mm->ca == 4) {
+            mm->bFlags |= MODES_ACFLAGS_AOG_VALID | MODES_ACFLAGS_AOG;
+        } else if (mm->ca == 5) {
+            mm->bFlags |= MODES_ACFLAGS_AOG_VALID;
+        }
+    }
+
+    // CC (Cross-link capability) not decoded
+
+    // CF (Control field)
+    if (mm->msgtype == 18) {
+        mm->cf = msg[0] & 7;
+    }
+
+    // DR (Downlink Request) not decoded
+
+    // FS (Flight Status)
+    if (mm->msgtype == 4 || mm->msgtype == 5 || mm->msgtype == 20 || mm->msgtype == 21) {
         mm->bFlags  |= MODES_ACFLAGS_FS_VALID;
-        mm->fs       = msg[0]  & 7;               // Flight status for DF4,5,20,21
+        mm->fs = msg[0] & 7;
         if (mm->fs <= 3) {
             mm->bFlags |= MODES_ACFLAGS_AOG_VALID;
             if (mm->fs & 1)
-                {mm->bFlags |= MODES_ACFLAGS_AOG;}
+                mm->bFlags |= MODES_ACFLAGS_AOG;
         }
     }
 
-    // Fields for DF17, DF18_CF0, DF18_CF1, DF18_CF6 squitters
-    if (  (mm->msgtype == 17) 
-      || ((mm->msgtype == 18) && ((mm->ca == 0) || (mm->ca == 1) || (mm->ca == 6)) )) {
-         int metype = mm->metype = msg[4] >> 3;   // Extended squitter message type
-         int mesub  = mm->mesub  = (metype == 29 ? ((msg[4]&6)>>1) : (msg[4]  & 7));   // Extended squitter message subtype
+    // ID (Identity)
+    if (mm->msgtype == 5  || mm->msgtype == 21) {
+        // Gillham encoded Squawk
+        int ID13Field = ((msg[2] << 8) | msg[3]) & 0x1FFF; 
+        if (ID13Field) {
+            mm->bFlags |= MODES_ACFLAGS_SQUAWK_VALID;
+            mm->modeA   = decodeID13Field(ID13Field);
+        }
+    }
 
-        // Decode the extended squitter message
+    // KE (Control, ELM) not decoded
 
-        if (metype >= 1 && metype <= 4) { // Aircraft Identification and Category
-            uint32_t chars;
-            mm->bFlags |= MODES_ACFLAGS_CALLSIGN_VALID;
+    // MB (messsage, Comm-B)
+    if (mm->msgtype == 20 || mm->msgtype == 21) {
+        decodeCommB(mm);
+    }
 
-            chars = (msg[5] << 16) | (msg[6] << 8) | (msg[7]);
-            mm->flight[3] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[2] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[1] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[0] = ais_charset[chars & 0x3F];
+    // MD (message, Comm-D) not decoded
 
-            chars = (msg[8] << 16) | (msg[9] << 8) | (msg[10]);
-            mm->flight[7] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[6] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[5] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[4] = ais_charset[chars & 0x3F];
+    // ME (message, extended squitter)
+    if (mm->msgtype == 17 ||   //  Extended squitter
+        (mm->msgtype == 18 &&  //  Extended squitter/non-transponder:
+         (mm->cf == 0 ||       //   ADS-B ES/NT devices that report the ICAO 24-bit address in the AA field
+          mm->cf == 1 ||       //   Reserved for ADS-B for ES/NT devices that use other addressing techniques in the AA field
+          mm->cf == 6))) {     //   ADS-B rebroadcast using the same type codes and message formats as defined for DF = 17 ADS-B messages
+            decodeExtendedSquitter(mm);
+    }
 
-            mm->flight[8] = '\0';
+    // MV (message, ACAS) not decoded
+    // ND (number of D-segment) not decoded
+    // RI (Reply information) not decoded
+    // SL (Sensitivity level, ACAS) not decoded
+    // UM (Utility Message) not decoded
 
-        } else if (metype == 19) { // Airborne Velocity Message
+    // VS (Vertical Status)
+    if (mm->msgtype == 0 || mm->msgtype == 16) {
+        mm->bFlags |= MODES_ACFLAGS_AOG_VALID;        
+        if (msg[0] & 0x04)
+            mm->bFlags |= MODES_ACFLAGS_AOG;
+    }
 
-           // Presumably airborne if we get an Airborne Velocity Message
-            mm->bFlags |= MODES_ACFLAGS_AOG_VALID; 
+    // all done
+    return 0;
+}
 
-            if ( (mesub >= 1) && (mesub <= 4) ) {
-                int vert_rate = ((msg[8] & 0x07) << 6) | (msg[9] >> 2);
-                if (vert_rate) {
-                    --vert_rate;
-                    if (msg[8] & 0x08) 
-                      {vert_rate = 0 - vert_rate;}
-                    mm->vert_rate =  vert_rate * 64;
-                    mm->bFlags   |= MODES_ACFLAGS_VERTRATE_VALID;
+static void decodeExtendedSquitter(struct modesMessage *mm)
+{    
+    unsigned char *msg = mm->msg;
+    int metype = mm->metype = msg[4] >> 3;   // Extended squitter message type
+    int mesub  = mm->mesub  = (metype == 29 ? ((msg[4]&6)>>1) : (msg[4]  & 7));   // Extended squitter message subtype
+
+    switch (metype) {
+    case 1: case 2: case 3: case 4: {
+        // Aircraft Identification and Category
+        uint32_t chars;
+
+        mm->bFlags |= MODES_ACFLAGS_CALLSIGN_VALID;
+
+        chars = (msg[5] << 16) | (msg[6] << 8) | (msg[7]);
+        mm->flight[3] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[2] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[1] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[0] = ais_charset[chars & 0x3F];
+        
+        chars = (msg[8] << 16) | (msg[9] << 8) | (msg[10]);
+        mm->flight[7] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[6] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[5] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[4] = ais_charset[chars & 0x3F];
+        
+        mm->flight[8] = '\0';
+        break;
+    }
+
+    case 19: { // Airborne Velocity Message        
+        // Presumably airborne if we get an Airborne Velocity Message
+        mm->bFlags |= MODES_ACFLAGS_AOG_VALID; 
+        
+        if ( (mesub >= 1) && (mesub <= 4) ) {
+            int vert_rate = ((msg[8] & 0x07) << 6) | (msg[9] >> 2);
+            if (vert_rate) {
+                --vert_rate;
+                if (msg[8] & 0x08) 
+                    {vert_rate = 0 - vert_rate;}
+                mm->vert_rate =  vert_rate * 64;
+                mm->bFlags   |= MODES_ACFLAGS_VERTRATE_VALID;
+            }
+        }
+
+        if ((mesub == 1) || (mesub == 2)) {
+            int ew_raw = ((msg[5] & 0x03) << 8) |  msg[6];
+            int ew_vel = ew_raw - 1;
+            int ns_raw = ((msg[7] & 0x7F) << 3) | (msg[8] >> 5);
+            int ns_vel = ns_raw - 1;
+            
+            if (mesub == 2) { // If (supersonic) unit is 4 kts
+                ns_vel = ns_vel << 2;
+                ew_vel = ew_vel << 2;
+            }
+            
+            if (ew_raw) { // Do East/West  
+                mm->bFlags |= MODES_ACFLAGS_EWSPEED_VALID;
+                if (msg[5] & 0x04)
+                    {ew_vel = 0 - ew_vel;}                   
+                mm->ew_velocity = ew_vel;
+            }
+            
+            if (ns_raw) { // Do North/South
+                mm->bFlags |= MODES_ACFLAGS_NSSPEED_VALID;
+                if (msg[7] & 0x80)
+                    {ns_vel = 0 - ns_vel;}                   
+                mm->ns_velocity = ns_vel;
+            }
+            
+            if (ew_raw && ns_raw) {
+                // Compute velocity and angle from the two speed components
+                mm->bFlags |= (MODES_ACFLAGS_SPEED_VALID | MODES_ACFLAGS_HEADING_VALID | MODES_ACFLAGS_NSEWSPD_VALID);
+                mm->velocity = (int) sqrt((ns_vel * ns_vel) + (ew_vel * ew_vel));
+                
+                if (mm->velocity) {
+                    mm->heading = (int) (atan2(ew_vel, ns_vel) * 180.0 / M_PI);
+                    // We don't want negative values but a 0-360 scale
+                    if (mm->heading < 0) mm->heading += 360;
                 }
             }
-
-            if ((mesub == 1) || (mesub == 2)) {
-                int ew_raw = ((msg[5] & 0x03) << 8) |  msg[6];
-                int ew_vel = ew_raw - 1;
-                int ns_raw = ((msg[7] & 0x7F) << 3) | (msg[8] >> 5);
-                int ns_vel = ns_raw - 1;
-
-                if (mesub == 2) { // If (supersonic) unit is 4 kts
-                   ns_vel = ns_vel << 2;
-                   ew_vel = ew_vel << 2;
-                }
-
-                if (ew_raw) { // Do East/West  
-                    mm->bFlags |= MODES_ACFLAGS_EWSPEED_VALID;
-                    if (msg[5] & 0x04)
-                        {ew_vel = 0 - ew_vel;}                   
-                    mm->ew_velocity = ew_vel;
-                }
-
-                if (ns_raw) { // Do North/South
-                    mm->bFlags |= MODES_ACFLAGS_NSSPEED_VALID;
-                    if (msg[7] & 0x80)
-                        {ns_vel = 0 - ns_vel;}                   
-                    mm->ns_velocity = ns_vel;
-                }
-
-                if (ew_raw && ns_raw) {
-                    // Compute velocity and angle from the two speed components
-                    mm->bFlags |= (MODES_ACFLAGS_SPEED_VALID | MODES_ACFLAGS_HEADING_VALID | MODES_ACFLAGS_NSEWSPD_VALID);
-                    mm->velocity = (int) sqrt((ns_vel * ns_vel) + (ew_vel * ew_vel));
-
-                    if (mm->velocity) {
-                        mm->heading = (int) (atan2(ew_vel, ns_vel) * 180.0 / M_PI);
-                        // We don't want negative values but a 0-360 scale
-                        if (mm->heading < 0) mm->heading += 360;
-                    }
-                }
-
-            } else if (mesub == 3 || mesub == 4) {
-                int airspeed = ((msg[7] & 0x7f) << 3) | (msg[8] >> 5);
-                if (airspeed) {
-                    mm->bFlags |= MODES_ACFLAGS_SPEED_VALID;
-                    --airspeed;
-                    if (mesub == 4)  // If (supersonic) unit is 4 kts
-                        {airspeed = airspeed << 2;}
-                    mm->velocity =  airspeed;
-                }
-
-                if (msg[5] & 0x04) {
-                    mm->bFlags |= MODES_ACFLAGS_HEADING_VALID;
-                    mm->heading = ((((msg[5] & 0x03) << 8) | msg[6]) * 45) >> 7;
-                }
+            
+        } else if (mesub == 3 || mesub == 4) {
+            int airspeed = ((msg[7] & 0x7f) << 3) | (msg[8] >> 5);
+            if (airspeed) {
+                mm->bFlags |= MODES_ACFLAGS_SPEED_VALID;
+                --airspeed;
+                if (mesub == 4)  // If (supersonic) unit is 4 kts
+                    {airspeed = airspeed << 2;}
+                mm->velocity =  airspeed;
             }
+            
+            if (msg[5] & 0x04) {
+                mm->bFlags |= MODES_ACFLAGS_HEADING_VALID;
+                mm->heading = ((((msg[5] & 0x03) << 8) | msg[6]) * 45) >> 7;
+            }
+        }
 
-        } else if (metype >= 5 && metype <= 22) { // Position Message
+        break;
+    }
+        
+    case 5: case 6: case 7: case 8: {
+        // Ground position
+        int movement;
+
+        mm->bFlags |= MODES_ACFLAGS_AOG_VALID | MODES_ACFLAGS_AOG;
+        mm->raw_latitude  = ((msg[6] & 3) << 15) | (msg[7] << 7) | (msg[8] >> 1);
+        mm->raw_longitude = ((msg[8] & 1) << 16) | (msg[9] << 8) | (msg[10]);
+        mm->bFlags       |= (mm->msg[6] & 0x04) ? MODES_ACFLAGS_LLODD_VALID 
+            : MODES_ACFLAGS_LLEVEN_VALID;
+
+        movement = ((msg[4] << 4) | (msg[5] >> 4)) & 0x007F;
+        if ((movement) && (movement < 125)) {
+            mm->bFlags |= MODES_ACFLAGS_SPEED_VALID;
+            mm->velocity = decodeMovementField(movement);
+        }
+
+        if (msg[5] & 0x08) {
+            mm->bFlags |= MODES_ACFLAGS_HEADING_VALID;
+            mm->heading = ((((msg[5] << 4) | (msg[6] >> 4)) & 0x007F) * 45) >> 4;
+        }
+        
+        break;
+    }
+
+    case 0: // Airborne position, baro altitude only
+    case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16: case 17: case 18: // Airborne position, baro
+    case 20: case 21: case 22: { // Airborne position, GNSS HAE       
+        int AC12Field;
+
+        mm->bFlags |= MODES_ACFLAGS_AOG_VALID;
+
+        if (metype != 0) {
             mm->raw_latitude  = ((msg[6] & 3) << 15) | (msg[7] << 7) | (msg[8] >> 1);
             mm->raw_longitude = ((msg[8] & 1) << 16) | (msg[9] << 8) | (msg[10]);
             mm->bFlags       |= (mm->msg[6] & 0x04) ? MODES_ACFLAGS_LLODD_VALID 
-                                                    : MODES_ACFLAGS_LLEVEN_VALID;
-            if (metype >= 9) {        // Airborne
-                int AC12Field = ((msg[5] << 4) | (msg[6] >> 4)) & 0x0FFF;
-                mm->bFlags |= MODES_ACFLAGS_AOG_VALID;
-                if (AC12Field) {// Only attempt to decode if a valid (non zero) altitude is present
-                    mm->bFlags |= MODES_ACFLAGS_ALTITUDE_VALID;
-                    mm->altitude = decodeAC12Field(AC12Field, &mm->unit);
-                }
-            } else {                      // Ground
-                int movement = ((msg[4] << 4) | (msg[5] >> 4)) & 0x007F;
-                mm->bFlags |= MODES_ACFLAGS_AOG_VALID | MODES_ACFLAGS_AOG;
-                if ((movement) && (movement < 125)) {
-                    mm->bFlags |= MODES_ACFLAGS_SPEED_VALID;
-                    mm->velocity = decodeMovementField(movement);
-                }
-
-                if (msg[5] & 0x08) {
-                    mm->bFlags |= MODES_ACFLAGS_HEADING_VALID;
-                    mm->heading = ((((msg[5] << 4) | (msg[6] >> 4)) & 0x007F) * 45) >> 4;
-                }
-            }
-
-        } else if (metype == 23) {	// Test metype squawk field
-			if (mesub == 7) {		// (see 1090-WP-15-20)
-				int ID13Field = (((msg[5] << 8) | msg[6]) & 0xFFF1)>>3;
-				if (ID13Field) {
-					mm->bFlags |= MODES_ACFLAGS_SQUAWK_VALID;
-					mm->modeA   = decodeID13Field(ID13Field);
-				}
-            }
-
-        } else if (metype == 24) { // Reserved for Surface System Status
-
-        } else if (metype == 28) { // Extended Squitter Aircraft Status
-			if (mesub == 1) {      // Emergency status squawk field
-				int ID13Field = (((msg[5] << 8) | msg[6]) & 0x1FFF);
-				if (ID13Field) {
-					mm->bFlags |= MODES_ACFLAGS_SQUAWK_VALID;
-					mm->modeA   = decodeID13Field(ID13Field);
-				}
-            }
-
-        } else if (metype == 29) { // Aircraft Trajectory Intent
-
-        } else if (metype == 30) { // Aircraft Operational Coordination
-
-        } else if (metype == 31) { // Aircraft Operational Status
-
-        } else { // Other metypes
-
+                : MODES_ACFLAGS_LLEVEN_VALID;
         }
+
+        AC12Field = ((msg[5] << 4) | (msg[6] >> 4)) & 0x0FFF;
+        if (AC12Field) {// Only attempt to decode if a valid (non zero) altitude is present
+            mm->bFlags |= MODES_ACFLAGS_ALTITUDE_VALID;
+            mm->altitude = decodeAC12Field(AC12Field, &mm->unit);
+        }
+        
+        break;
     }
 
-    // Fields for DF20, DF21 Comm-B
-    if ((mm->msgtype == 20) || (mm->msgtype == 21)){
-
-        if (msg[4] == 0x20) { // Aircraft Identification
-            uint32_t chars;
-            mm->bFlags |= MODES_ACFLAGS_CALLSIGN_VALID;
-
-            chars = (msg[5] << 16) | (msg[6] << 8) | (msg[7]);
-            mm->flight[3] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[2] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[1] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[0] = ais_charset[chars & 0x3F];
-
-            chars = (msg[8] << 16) | (msg[9] << 8) | (msg[10]);
-            mm->flight[7] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[6] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[5] = ais_charset[chars & 0x3F]; chars = chars >> 6;
-            mm->flight[4] = ais_charset[chars & 0x3F];
-
-            mm->flight[8] = '\0';
-        } else {
+    case 23: { // Test message
+        if (mesub == 7) {		// (see 1090-WP-15-20)
+            int ID13Field = (((msg[5] << 8) | msg[6]) & 0xFFF1)>>3;
+            if (ID13Field) {
+                mm->bFlags |= MODES_ACFLAGS_SQUAWK_VALID;
+                mm->modeA   = decodeID13Field(ID13Field);
+            }
         }
+        break;
+    }
+
+    case 24: // Reserved for Surface System Status
+        break;
+
+    case 28: { // Extended Squitter Aircraft Status
+        if (mesub == 1) {      // Emergency status squawk field
+            int ID13Field = (((msg[5] << 8) | msg[6]) & 0x1FFF);
+            if (ID13Field) {
+                mm->bFlags |= MODES_ACFLAGS_SQUAWK_VALID;
+                mm->modeA   = decodeID13Field(ID13Field);
+            }
+        }
+        break;
+    }
+
+    case 29: // Aircraft Trajectory Intent
+        break;
+
+    case 30: // Aircraft Operational Coordination
+        break;
+
+    case 31: // Aircraft Operational Status
+        break;
+
+    default: 
+        break;
+    }
+}
+
+static void decodeCommB(struct modesMessage *mm)
+{    
+    unsigned char *msg = mm->msg;
+
+    // This is a bit hairy as we don't know what the requested register was
+    if (msg[4] == 0x20) { // BDS 2,0 Aircraft Identification
+        uint32_t chars;
+        mm->bFlags |= MODES_ACFLAGS_CALLSIGN_VALID;
+        
+        chars = (msg[5] << 16) | (msg[6] << 8) | (msg[7]);
+        mm->flight[3] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[2] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[1] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[0] = ais_charset[chars & 0x3F];
+        
+        chars = (msg[8] << 16) | (msg[9] << 8) | (msg[10]);
+        mm->flight[7] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[6] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[5] = ais_charset[chars & 0x3F]; chars = chars >> 6;
+        mm->flight[4] = ais_charset[chars & 0x3F];
+        
+        mm->flight[8] = '\0';
     }
 }
 //
@@ -1171,12 +897,13 @@ void displayModesMessage(struct modesMessage *mm) {
     }
 
     if (mm->msgtype < 32)
-        printf("CRC: %06x (%s)\n", (int)mm->crc, mm->crcok ? "ok" : "wrong");
+        printf("CRC: %06x\n", (int)mm->crc);
 
     if (mm->correctedbits != 0)
         printf("No. of bit errors fixed: %d\n", mm->correctedbits);
 
     printf("SNR: %d.%d dB\n", mm->signalLevel/5, 2*(mm->signalLevel%5));
+    if (mm->score) printf("Score: %d\n", mm->score);
 
     if (mm->timestampMsg)
         printf("Time: %.2fus (phase: %d)\n", mm->timestampMsg / 12.0, (unsigned int) (360 * (mm->timestampMsg % 6) / 6));
@@ -1201,7 +928,8 @@ void displayModesMessage(struct modesMessage *mm) {
         printf("  ICAO Address   : %06x\n", mm->addr);
 
         if (mm->msgtype == 20) {
-            printf("  Comm-B BDS     : %x\n", mm->msg[4]);
+            if (mm->bds != 0)
+                printf("  Comm-B BDS     : %02x\n", mm->bds);
 
             // Decode the extended squitter message
             if        ( mm->msg[4]       == 0x20) { // BDS 2,0 Aircraft identification
@@ -1235,7 +963,8 @@ void displayModesMessage(struct modesMessage *mm) {
         printf("  ICAO Address   : %06x\n", mm->addr);
 
         if (mm->msgtype == 21) {
-            printf("  Comm-B BDS     : %x\n", mm->msg[4]);
+            if (mm->bds != 0)
+                printf("  Comm-B BDS     : %02x\n", mm->bds);
 
             // Decode the extended squitter message
             if        ( mm->msg[4]       == 0x20) { // BDS 2,0 Aircraft identification
@@ -1580,6 +1309,7 @@ void detectModeS(uint16_t *m, uint32_t mlen) {
         int msglen, scanlen;
         uint32_t sigLevel, noiseLevel;
         uint16_t snr;
+        int message_ok;
 
         pPreamble = &m[j];
         pPayload  = &m[j+MODES_PREAMBLE_SAMPLES];
@@ -1588,7 +1318,6 @@ void detectModeS(uint16_t *m, uint32_t mlen) {
         // is required for every bit of the input stream, and we don't want to be memset-ing the whole
         // modesMessage structure two million times per second if we don't have to..
         mm.bFlags          =
-        mm.crcok           = 
         mm.correctedbits   = 0;
 
         if (!use_correction)  // This is not a re-try with phase correction
@@ -1805,7 +1534,7 @@ void detectModeS(uint16_t *m, uint32_t mlen) {
             mm.phase_corrected = use_correction;
 
             // Decode the received message
-            decodeModesMessage(&mm, msg);
+            message_ok = (decodeModesMessage(&mm, msg) == 0);
 
             // Update statistics
             if (Modes.stats) {
@@ -1818,16 +1547,16 @@ void detectModeS(uint16_t *m, uint32_t mlen) {
                 default: dstats->demodulated3++; break;
                 }
                 
-                if (mm.crcok) {
+                if (!message_ok) {
+                    dstats->badcrc++;
+                } else if (mm.correctedbits == 0) {
                     dstats->goodcrc++;
                     dstats->goodcrc_byphase[0]++;
-                } else if (mm.correctedbits > 0) {
+                } else {
                     dstats->badcrc++;                    
                     dstats->fixed++;
                     if (mm.correctedbits <= MODES_MAX_BITERRORS)
                         dstats->bit_fix[mm.correctedbits-1] += 1;
-                } else {
-                    dstats->badcrc++;
                 }
             }
 
@@ -1835,24 +1564,22 @@ void detectModeS(uint16_t *m, uint32_t mlen) {
             if (use_correction) {
                 if (Modes.debug & MODES_DEBUG_DEMOD)
                     dumpRawMessage("Demodulated with 0 errors", msg, m, j);
-                else if (Modes.debug & MODES_DEBUG_BADCRC &&
-                         mm.msgtype == 17 &&
-                         (!mm.crcok || mm.correctedbits != 0))
-                    dumpRawMessage("Decoded with bad CRC", msg, m, j);
-                else if (Modes.debug & MODES_DEBUG_GOODCRC && mm.crcok &&
-                         mm.correctedbits == 0)
+                else if (Modes.debug & MODES_DEBUG_BADCRC && mm.correctedbits != 0)
+                    dumpRawMessage("Decoded with corrected CRC", msg, m, j);
+                else if (Modes.debug & MODES_DEBUG_GOODCRC && mm.correctedbits == 0)
                     dumpRawMessage("Decoded with good CRC", msg, m, j);
             }
 
             // Skip this message if we are sure it's fine
-            if (mm.crcok || mm.correctedbits) {
+            if (message_ok) {
                 j += (MODES_PREAMBLE_US+msglen)*2 - 1;
+
+                // Pass data to the next layer
+                useModesMessage(&mm);
             }
 
-            // Pass data to the next layer
-            useModesMessage(&mm);
-
         } else {
+            message_ok = 0;
             if (Modes.debug & MODES_DEBUG_DEMODERR && use_correction) {
                 printf("The following message has %d demod errors\n", errors);
                 dumpRawMessage("Demodulated with errors", msg, m, j);
@@ -1860,502 +1587,10 @@ void detectModeS(uint16_t *m, uint32_t mlen) {
         }
 
         // Retry with phase correction if enabled, necessary and possible.
-        if (Modes.phase_enhance && !mm.crcok && !mm.correctedbits && !use_correction && j && detectOutOfPhase(pPreamble)) {
+        if (Modes.phase_enhance && (!message_ok || mm.correctedbits > 0) && !use_correction && j && detectOutOfPhase(pPreamble)) {
             use_correction = 1; j--;
         } else {
             use_correction = 0; 
-        }
-    }
-}
-
-// 2.4MHz sampling rate version
-//
-// When sampling at 2.4MHz we have exactly 6 samples per 5 symbols.
-// Each symbol is 500ns wide, each sample is 416.7ns wide
-//
-// We maintain a phase offset that is expressed in units of 1/5 of a sample i.e. 1/6 of a symbol, 83.333ns
-// Each symbol we process advances the phase offset by 6 i.e. 6/5 of a sample, 500ns
-//
-// The correlation functions below correlate a 1-0 pair of symbols (i.e. manchester encoded 1 bit)
-// starting at the given sample, and assuming that the symbol starts at a fixed 0-5 phase offset within
-// m[0]. They return a correlation value, generally interpreted as >0 = 1 bit, <0 = 0 bit
-
-// TODO check if there are better (or more balanced) correlation functions to use here
-
-// nb: the correlation functions sum to zero, so we do not need to adjust for the DC offset in the input signal
-// (adding any constant value to all of m[0..3] does not change the result)
-
-static inline int slice_phase0(uint16_t *m) {
-    return 5 * m[0] - 3 * m[1] - 2 * m[2];
-}
-static inline int slice_phase1(uint16_t *m) {
-    return 4 * m[0] - m[1] - 3 * m[2];
-}
-static inline int slice_phase2(uint16_t *m) {
-    return 3 * m[0] + m[1] - 4 * m[2];
-}
-static inline int slice_phase3(uint16_t *m) {
-    return 2 * m[0] + 3 * m[1] - 5 * m[2];
-}
-static inline int slice_phase4(uint16_t *m) {
-    return m[0] + 5 * m[1] - 5 * m[2] - m[3];
-}
-
-static inline int correlate_phase0(uint16_t *m) {
-    return slice_phase0(m) * 26;
-}
-static inline int correlate_phase1(uint16_t *m) {
-    return slice_phase1(m) * 38;
-}
-static inline int correlate_phase2(uint16_t *m) {
-    return slice_phase2(m) * 38;
-}
-static inline int correlate_phase3(uint16_t *m) {
-    return slice_phase3(m) * 26;
-}
-static inline int correlate_phase4(uint16_t *m) {
-    return slice_phase4(m) * 19;
-}
-
-//
-// These functions work out the correlation quality for the 10 symbols (5 bits) starting at m[0] + given phase offset.
-// This is used to find the right phase offset to use for decoding.
-//
-
-static inline int correlate_check_0(uint16_t *m) {
-    return
-        abs(correlate_phase0(&m[0])) +
-        abs(correlate_phase2(&m[2])) +
-        abs(correlate_phase4(&m[4])) +
-        abs(correlate_phase1(&m[7])) +
-        abs(correlate_phase3(&m[9]));
-}
-
-static inline int correlate_check_1(uint16_t *m) {
-    return
-        abs(correlate_phase1(&m[0])) +
-        abs(correlate_phase3(&m[2])) +
-        abs(correlate_phase0(&m[5])) +
-        abs(correlate_phase2(&m[7])) +
-        abs(correlate_phase4(&m[9]));
-}
-
-static inline int correlate_check_2(uint16_t *m) {
-    return
-        abs(correlate_phase2(&m[0])) +
-        abs(correlate_phase4(&m[2])) +
-        abs(correlate_phase1(&m[5])) +
-        abs(correlate_phase3(&m[7])) +
-        abs(correlate_phase0(&m[10]));
-}
-
-static inline int correlate_check_3(uint16_t *m) {
-    return
-        abs(correlate_phase3(&m[0])) +
-        abs(correlate_phase0(&m[3])) +
-        abs(correlate_phase2(&m[5])) +
-        abs(correlate_phase4(&m[7])) +
-        abs(correlate_phase1(&m[10]));
-}
-
-static inline int correlate_check_4(uint16_t *m) {
-    return
-        abs(correlate_phase4(&m[0])) +
-        abs(correlate_phase1(&m[3])) +
-        abs(correlate_phase3(&m[5])) +
-        abs(correlate_phase0(&m[8])) +
-        abs(correlate_phase2(&m[10]));
-}
-
-// Work out the best phase offset to use for the given message.
-static int best_phase(uint16_t *m) {
-    int test;
-    int best = -1;
-    int bestval = (m[0] + m[1] + m[2] + m[3] + m[4] + m[5]); // minimum correlation quality we will accept
-
-    // empirical testing suggests that 4..8 is the best range to test for here
-    // (testing a wider range runs the danger of picking the wrong phase for
-    // a message that would otherwise be successfully decoded - the correlation
-    // functions can match well with a one symbol / half bit offset)
-
-    // this is consistent with the peak detection which should produce
-    // the first data symbol with phase offset 4..8
-
-    //test = correlate_check_2(&m[0]);
-    //if (test > bestval) { bestval = test; best = 2; }
-    //test = correlate_check_3(&m[0]);
-    //if (test > bestval) { bestval = test; best = 3; }
-    test = correlate_check_4(&m[0]);
-    if (test > bestval) { bestval = test; best = 4; }
-    test = correlate_check_0(&m[1]);
-    if (test > bestval) { bestval = test; best = 5; }
-    test = correlate_check_1(&m[1]);
-    if (test > bestval) { bestval = test; best = 6; }
-    test = correlate_check_2(&m[1]);
-    if (test > bestval) { bestval = test; best = 7; }
-    test = correlate_check_3(&m[1]);
-    if (test > bestval) { bestval = test; best = 8; }
-    //test = correlate_check_4(&m[1]);
-    //if (test > bestval) { bestval = test; best = 9; }
-    return best;
-}
-
-//
-//=========================================================================
-//
-// Detect a Mode S messages inside the magnitude buffer pointed by 'm' and of
-// size 'mlen' bytes. Every detected Mode S message is convert it into a
-// stream of bits and passed to the function to display it.
-//
-void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
-    struct modesMessage mm;
-    unsigned char msg[MODES_LONG_MSG_BYTES], *pMsg;
-    uint32_t j;
-
-    memset(&mm, 0, sizeof(mm));
-
-    for (j = 0; j < mlen; j++) {
-        uint16_t *preamble = &m[j];
-        int high, i, initial_phase, phase, errors, errors56, errorsTy; 
-        int msglen, scanlen;
-        uint16_t *pPtr;
-        uint8_t theByte, theErrs;
-        uint32_t sigLevel, noiseLevel;
-        uint16_t snr;
-        int try_phase;
-
-        // Look for a message starting at around sample 0 with phase offset 3..7
-
-        // Ideal sample values for preambles with different phase
-        // Xn is the first data symbol with phase offset N
-        //
-        // sample#: 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0
-        // phase 3: 2/4\0/5\1 0 0 0 0/5\1/3 3\0 0 0 0 0 0 X4
-        // phase 4: 1/5\0/4\2 0 0 0 0/4\2 2/4\0 0 0 0 0 0 0 X0
-        // phase 5: 0/5\1/3 3\0 0 0 0/3 3\1/5\0 0 0 0 0 0 0 X1
-        // phase 6: 0/4\2 2/4\0 0 0 0 2/4\0/5\1 0 0 0 0 0 0 X2
-        // phase 7: 0/3 3\1/5\0 0 0 0 1/5\0/4\2 0 0 0 0 0 0 X3
-        //
-        
-        // quick check: we must have a rising edge 0->1 and a falling edge 12->13
-        if (! (preamble[0] < preamble[1] && preamble[12] > preamble[13]) )
-           continue;
-
-        if (preamble[1] > preamble[2] &&                                       // 1
-            preamble[2] < preamble[3] && preamble[3] > preamble[4] &&          // 3
-            preamble[8] < preamble[9] && preamble[9] > preamble[10] &&         // 9
-            preamble[10] < preamble[11]) {                                     // 11-12
-            // peaks at 1,3,9,11-12: phase 3
-            high = (preamble[1] + preamble[3] + preamble[9] + preamble[11] + preamble[12]) / 4;
-            sigLevel = preamble[1] + preamble[3] + preamble[9];
-            noiseLevel = preamble[5] + preamble[6] + preamble[7];
-        } else if (preamble[1] > preamble[2] &&                                // 1
-                   preamble[2] < preamble[3] && preamble[3] > preamble[4] &&   // 3
-                   preamble[8] < preamble[9] && preamble[9] > preamble[10] &&  // 9
-                   preamble[11] < preamble[12]) {                              // 12
-            // peaks at 1,3,9,12: phase 4
-            high = (preamble[1] + preamble[3] + preamble[9] + preamble[12]) / 4;
-            sigLevel = preamble[1] + preamble[3] + preamble[9] + preamble[12];
-            noiseLevel = preamble[5] + preamble[6] + preamble[7] + preamble[8];
-        } else if (preamble[1] > preamble[2] &&                                // 1
-                   preamble[2] < preamble[3] && preamble[4] > preamble[5] &&   // 3-4
-                   preamble[8] < preamble[9] && preamble[10] > preamble[11] && // 9-10
-                   preamble[11] < preamble[12]) {                              // 12
-            // peaks at 1,3-4,9-10,12: phase 5
-            high = (preamble[1] + preamble[3] + preamble[4] + preamble[9] + preamble[10] + preamble[12]) / 4;
-            sigLevel = preamble[1] + preamble[12];
-            noiseLevel = preamble[6] + preamble[7];
-        } else if (preamble[1] > preamble[2] &&                                 // 1
-                   preamble[3] < preamble[4] && preamble[4] > preamble[5] &&    // 4
-                   preamble[9] < preamble[10] && preamble[10] > preamble[11] && // 10
-                   preamble[11] < preamble[12]) {                               // 12
-            // peaks at 1,4,10,12: phase 6
-            high = (preamble[1] + preamble[4] + preamble[10] + preamble[12]) / 4;
-            sigLevel = preamble[1] + preamble[4] + preamble[10] + preamble[12];
-            noiseLevel = preamble[5] + preamble[6] + preamble[7] + preamble[8];
-        } else if (preamble[2] > preamble[3] &&                                 // 1-2
-                   preamble[3] < preamble[4] && preamble[4] > preamble[5] &&    // 4
-                   preamble[9] < preamble[10] && preamble[10] > preamble[11] && // 10
-                   preamble[11] < preamble[12]) {                               // 12
-            // peaks at 1-2,4,10,12: phase 7
-            high = (preamble[1] + preamble[2] + preamble[4] + preamble[10] + preamble[12]) / 4;
-            sigLevel = preamble[4] + preamble[10] + preamble[12];
-            noiseLevel = preamble[6] + preamble[7] + preamble[8];
-        } else {
-            // no suitable peaks
-            continue;
-        }
-
-        // Check for enough signal
-        if (sigLevel * 2 < 3 * noiseLevel) // about 3.5dB SNR
-            continue;
-
-        // Check that the "quiet" bits 6,7,15,16,17 are actually quiet
-        if (preamble[5] >= high ||
-            preamble[6] >= high ||
-            preamble[7] >= high ||
-            preamble[8] >= high ||
-            preamble[14] >= high ||
-            preamble[15] >= high ||
-            preamble[16] >= high ||
-            preamble[17] >= high ||
-            preamble[18] >= high) {
-            ++Modes.stat_preamble_not_quiet;
-            continue;
-        }
-
-        // Crosscorrelate against the first few bits to find a likely phase offset
-        initial_phase = best_phase(&preamble[19]);
-        if (initial_phase < 0) {
-            ++Modes.stat_preamble_no_correlation;
-            continue; // nothing satisfactory
-        }
-
-        Modes.stat_valid_preamble++;
-        Modes.stat_preamble_phase[initial_phase%MODES_MAX_PHASE_STATS]++;
-
-        try_phase = initial_phase;
-
-    retry:
-        // Rather than clear the whole mm structure, just clear the parts which are required. The clear
-        // is required for every possible preamble, and we don't want to be memset-ing the whole
-        // modesMessage structure if we don't have to..
-        mm.bFlags          =
-            mm.crcok           = 
-            mm.correctedbits   = 0;
-
-        // Decode all the next 112 bits, regardless of the actual message
-        // size. We'll check the actual message type later
-        
-        pMsg = &msg[0];
-        pPtr = &m[j+19] + (try_phase/5);
-        phase = try_phase % 5;
-        theByte = 0;
-        theErrs = 0; errorsTy = 0;
-        errors  = 0; errors56 = 0;
-        msglen = scanlen = MODES_LONG_MSG_BITS;
-        for (i = 0; i < scanlen; i++) {
-            int test;
-
-            switch (phase) {
-            case 0:
-                test = slice_phase0(pPtr);
-                phase = 2;
-                pPtr += 2;
-                break;
-
-            case 1:
-                test = slice_phase1(pPtr);
-                phase = 3;
-                pPtr += 2;
-                break;
-
-            case 2:
-                test = slice_phase2(pPtr);
-                phase = 4;
-                pPtr += 2;
-                break;
-
-            case 3:
-                test = slice_phase3(pPtr);
-                phase = 0;
-                pPtr += 3;
-                break;
-
-            case 4:
-                test = slice_phase4(pPtr);
-
-                // A phase-4 bit exactly straddles a sample boundary.
-                // Here's what a 1-0 bit with phase 4 looks like:
-                //
-                //     |SYM 1|
-                //  xxx|     |     |xxx
-                //           |SYM 2|
-                //
-                // 012340123401234012340  <-- sample phase
-                // | 0  | 1  | 2  | 3  |  <-- sample boundaries
-                //
-                // Samples 1 and 2 only have power from symbols 1 and 2.
-                // So we can use this to extract signal/noise values
-                // as one of the two symbols is high (signal) and the
-                // other is low (noise)
-                //
-                // This also gives us an equal number of signal and noise
-                // samples, which is convenient. Using the first half of
-                // a phase 0 bit, or the second half of a phase 3 bit, would
-                // also work, but we have no guarantees about how many signal
-                // or noise bits we'd see in those phases.
-
-                if (test < 0) {   // 0 1
-                    noiseLevel += pPtr[1];
-                    sigLevel += pPtr[2];
-                } else {          // 1 0
-                    sigLevel += pPtr[1];
-                    noiseLevel += pPtr[2];
-                }
-                phase = 1;
-                pPtr += 3;
-                break;
-
-            default:
-                test = 0;
-                break;
-            }
-
-            if (test > 0)
-                theByte |= 1;
-            /* else if (test < 0) theByte |= 0; */
-            else if (test == 0) {
-                if (i >= MODES_SHORT_MSG_BITS) { // poor correlation, and we're in the long part of a frame
-                    errors++;
-                } else if (i >= 5) {             // poor correlation, and we're in the short part of a frame                    
-                    scanlen = MODES_LONG_MSG_BITS;
-                    errors56 = ++errors;
-                } else if (i) {                  // poor correlation, and we're in the message type part of a frame
-                    errorsTy = errors56 = ++errors;
-                    theErrs |= 1;
-                } else {                         // poor correlation, and we're in the first bit of the message type part of a frame
-                    errorsTy = errors56 = ++errors;
-                    theErrs |= 1;
-                }
-            }
-
-            if ((i & 7) == 7)
-                *pMsg++ = theByte;
-
-            theByte = theByte << 1;
-
-            if (i < 7)
-              {theErrs = theErrs << 1;}
-
-            // If we've exceeded the permissible number of encoding errors, abandon ship now
-            if (errors > MODES_MSG_ENCODER_ERRS) {
-                if (i < MODES_SHORT_MSG_BITS) {
-                    msglen = 0;
-                } else if ((errorsTy == 1) && (theErrs == 0x80)) {
-                    // If we only saw one error in the first bit of the byte of the frame, then it's possible 
-                    // we guessed wrongly about the value of the bit. We may be able to correct it by guessing
-                    // the other way.
-                    //
-                    // We guessed a '1' at bit 7, which is the DF length bit == 112 Bits.
-                    // Inverting bit 7 will change the message type from a long to a short. 
-                    // Invert the bit, cross your fingers and carry on.
-                    msglen  = MODES_SHORT_MSG_BITS;
-                    msg[0] ^= theErrs; errorsTy = 0;
-                    errors  = errors56; // revert to the number of errors prior to bit 56
-                    Modes.stat_DF_Len_Corrected++;
-                } else if (i < MODES_LONG_MSG_BITS) {
-                    msglen = MODES_SHORT_MSG_BITS;
-                    errors = errors56;
-                } else {
-                    msglen = MODES_LONG_MSG_BITS;
-                }
-
-                break;
-            }
-        }
-
-        // Ensure msglen is consistent with the DF type
-        i = modesMessageLenByType(msg[0] >> 3);
-        if      (msglen > i) {msglen = i;}
-        else if (msglen < i) {msglen = 0;}
-
-        //
-        // If we guessed at any of the bits in the DF type field, then look to see if our guess was sensible.
-        // Do this by looking to see if the original guess results in the DF type being one of the ICAO defined
-        // message types. If it isn't then toggle the guessed bit and see if this new value is ICAO defined.
-        // if the new value is ICAO defined, then update it in our message.
-        if ((msglen) && (errorsTy == 1) && (theErrs & 0x78)) {
-            // We guessed at one (and only one) of the message type bits. See if our guess is "likely" 
-            // to be correct by comparing the DF against a list of known good DF's
-            int      thisDF      = ((theByte = msg[0]) >> 3) & 0x1f;
-            uint32_t validDFbits = 0x017F0831;   // One bit per 32 possible DF's. Set bits 0,4,5,11,16.17.18.19,20,21,22,24
-            uint32_t thisDFbit   = (1 << thisDF);
-            if (0 == (validDFbits & thisDFbit)) {
-                // The current DF is not ICAO defined, so is probably an errors. 
-                // Toggle the bit we guessed at and see if the resultant DF is more likely
-                theByte  ^= theErrs;
-                thisDF    = (theByte >> 3) & 0x1f;
-                thisDFbit = (1 << thisDF);
-                // if this DF any more likely?
-                if (validDFbits & thisDFbit) {
-                    // Yep, more likely, so update the main message 
-                    msg[0] = theByte;
-                    Modes.stat_DF_Type_Corrected++;
-                    errors--; // decrease the error count so we attempt to use the modified DF.
-                }
-            }
-        }
-
-        // snr = 5 * 20log10(sigLevel / noiseLevel)         (in units of 0.2dB)
-        //     = 100log10(sigLevel) - 100log10(noiseLevel)
-
-        while (sigLevel > 65535 || noiseLevel > 65535) {
-            sigLevel >>= 1;
-            noiseLevel >>= 1;
-        }
-        snr = Modes.log10lut[sigLevel] - Modes.log10lut[noiseLevel];
-
-        // When we reach this point, if error is small, and the signal strength is large enough
-        // we may have a Mode S message on our hands. It may still be broken and the CRC may not 
-        // be correct, but this can be handled by the next layer.
-        if ( (msglen) 
-             // && ((2 * snr) > (int) (MODES_MSG_SQUELCH_DB * 10))
-          && (errors      <= MODES_MSG_ENCODER_ERRS) ) {
-            // Set initial mm structure details
-            mm.timestampMsg = Modes.timestampBlk + (j*5) + try_phase;
-            mm.signalLevel = (snr > 255 ? 255 : (uint8_t)snr);
-            mm.phase_corrected = (initial_phase != try_phase);
-            
-            // Decode the received message
-            decodeModesMessage(&mm, msg);
-
-            // Update statistics
-            if (Modes.stats) {
-                struct demod_stats *dstats = (mm.phase_corrected ? &Modes.stat_demod_phasecorrected : &Modes.stat_demod);
-
-                switch (errors) {
-                case 0:  dstats->demodulated0++; break;
-                case 1:  dstats->demodulated1++; break;
-                case 2:  dstats->demodulated2++; break;
-                default: dstats->demodulated3++; break;
-                }
-                
-                if (mm.crcok) {
-                    dstats->goodcrc++;
-                    dstats->goodcrc_byphase[try_phase%MODES_MAX_PHASE_STATS]++;
-                } else if (mm.correctedbits > 0) {
-                    dstats->badcrc++;                    
-                    dstats->fixed++;
-                    if (mm.correctedbits <= MODES_MAX_BITERRORS)
-                        dstats->bit_fix[mm.correctedbits-1] += 1;
-                } else {
-                    dstats->badcrc++;
-                }
-            }
-            
-            // Skip this message if we are sure it's fine
-            if (mm.crcok || mm.correctedbits) {
-                j += (16+msglen)*6/5 - 1;
-            }
-            
-            // Pass data to the next layer
-            useModesMessage(&mm);
-
-            // Only try with different phases if we mostly demodulated OK,
-            // but the CRC failed. This seems to catch most of the cases
-            // where trying different phases actually helps, and is much
-            // cheaper than trying it on every single candidate that passes
-            // peak detection
-            if (Modes.phase_enhance && !mm.crcok && !mm.correctedbits) {
-                if (try_phase == initial_phase)
-                    ++Modes.stat_out_of_phase;
-                try_phase++;
-                if (try_phase == 9)
-                    try_phase = 4;
-                if (try_phase != initial_phase)
-                    goto retry;
-            }
         }
     }
 }
@@ -2371,18 +1606,16 @@ void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
 // processing and visualization
 //
 void useModesMessage(struct modesMessage *mm) {
-    if ((Modes.check_crc == 0) || (mm->crcok) || (mm->correctedbits)) { // not checking, ok or fixed
-        // If we are decoding, track aircraft
-        interactiveReceiveData(mm);
-
-        // In non-interactive non-quiet mode, display messages on standard output
-        if (!Modes.interactive && !Modes.quiet) {
-            displayModesMessage(mm);
-        }
-
-        // Feed output clients
-        if (Modes.net) {modesQueueOutput(mm);}
+    // If we are decoding, track aircraft
+    interactiveReceiveData(mm);
+    
+    // In non-interactive non-quiet mode, display messages on standard output
+    if (!Modes.interactive && !Modes.quiet) {
+        displayModesMessage(mm);
     }
+    
+    // Feed output clients
+    if (Modes.net) {modesQueueOutput(mm);}
 }
 //
 //=========================================================================

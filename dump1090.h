@@ -401,19 +401,21 @@ struct modesMessage {
     unsigned char msg[MODES_LONG_MSG_BYTES];      // Binary message.
     int           msgbits;                        // Number of bits in message 
     int           msgtype;                        // Downlink format #
-    int           crcok;                          // True if CRC was valid
     uint32_t      crc;                            // Message CRC
     int           correctedbits;                  // No. of bits corrected 
-    char          corrected[MODES_MAX_BITERRORS]; // corrected bit positions
     uint32_t      addr;                           // ICAO Address from bytes 1 2 and 3
     int           phase_corrected;                // True if phase correction was applied
     uint64_t      timestampMsg;                   // Timestamp of the message
     int           remote;                         // If set this message is from a remote station
     unsigned char signalLevel;                    // Signal Amplitude
+    int           score;                          // Message quality score
 
-    // DF 11
+    // DF 11,17
     int  ca;                    // Responder capabilities
     int  iid;
+
+    // DF 18
+    int  cf;                    // Control field
 
     // DF 17, DF 18
     int    metype;              // Extended squitter message type.
@@ -432,6 +434,9 @@ struct modesMessage {
     // DF4, DF5, DF20, DF21
     int  fs;                    // Flight status for DF4,5,20,21
     int  modeA;                 // 13 bits identity (Squawk).
+
+    // DF20/21 (sometimes)
+    int  bds;
 
     // Fields used by multiple message types.
     int  altitude;
@@ -457,13 +462,28 @@ int  ModeAToModeC      (unsigned int ModeA);
 //
 void detectModeS        (uint16_t *m, uint32_t mlen);
 void detectModeS_oversample (uint16_t *m, uint32_t mlen);
-void decodeModesMessage (struct modesMessage *mm, unsigned char *msg);
+int scoreModesMessage (unsigned char *msg);
+int decodeModesMessage (struct modesMessage *mm, unsigned char *msg);
 void displayModesMessage(struct modesMessage *mm);
 void useModesMessage    (struct modesMessage *mm);
 void computeMagnitudeVector(uint16_t *pData);
 int  decodeCPR          (struct aircraft *a, int fflag, int surface);
 int  decodeCPRrelative  (struct aircraft *a, int fflag, int surface);
-void modesInitErrorInfo ();
+int modesMessageLenByType(int type);
+
+// From crc.c:
+void modesChecksumInit();
+uint32_t modesChecksum(uint8_t *msg, int bits);
+int modesChecksumDiagnose(uint32_t syndrome, int bits, int *pos1, int *pos2);
+void modesChecksumFix(uint8_t *msg, int pos1, int pos2);
+
+// From icao_bloom.c:
+void icaoFilterInit();
+void icaoFilterAdd(uint32_t addr);
+int  icaoFilterTest(uint32_t addr);
+uint32_t icaoFilterTestFuzzy(uint32_t partial);
+void icaoFilterExpire();
+
 //
 // Functions exported from interactive.c
 //

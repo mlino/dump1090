@@ -557,7 +557,11 @@ int decodeBinMessage(struct client *c, char *p) {
         if (msgLen == MODEAC_MSG_BYTES) { // ModeA or ModeC
             decodeModeAMessage(&mm, ((msg[0] << 8) | msg[1]));
         } else {
-            decodeModesMessage(&mm, msg);
+            if (decodeModesMessage(&mm, msg) < 0) {
+                fprintf(stdout, "Rejecting inbound message!");
+                displayModesMessage(&mm);
+                return 0;
+            }
         }
 
         useModesMessage(&mm);

@@ -197,7 +197,8 @@ void modesInit(void) {
     }
 
     // Prepare error correction tables
-    modesInitErrorInfo();
+    modesChecksumInit();
+    icaoFilterInit();
 }
 //
 // =============================== RTLSDR handling ==========================
@@ -641,6 +642,8 @@ static void display_stats(void) {
 void backgroundTasks(void) {
     static time_t next_stats;
     static time_t next_json;
+
+    icaoFilterExpire();
 
     if (Modes.net) {
 	modesNetPeriodicWork();

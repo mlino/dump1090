@@ -179,10 +179,6 @@ void interactiveUpdateAircraftModeS() {
 struct aircraft *interactiveReceiveData(struct modesMessage *mm) {
     struct aircraft *a, *aux;
 
-    // Return if (checking crc) AND (not crcok) AND (not fixed)
-    if (Modes.check_crc && (mm->crcok == 0) && (mm->correctedbits == 0))
-        return NULL;
-
     // Lookup our aircraft or create a new one
     a = interactiveFindAircraft(mm->addr);
     if (!a) {                              // If it's a currently unknown aircraft....
