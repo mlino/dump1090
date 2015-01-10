@@ -1,6 +1,6 @@
 // dump1090, a Mode S messages decoder for RTLSDR devices.
 //
-// twopointfour.c - 2.4MHz Mode S demodulator.
+// demod_2400.c - 2.4MHz Mode S demodulator.
 //
 // Copyright (C) 2014,2015 Oliver Jowett <oliver@mutability.co.uk>
 //
