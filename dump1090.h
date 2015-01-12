@@ -460,8 +460,19 @@ int decodeModesMessage (struct modesMessage *mm, unsigned char *msg);
 void displayModesMessage(struct modesMessage *mm);
 void useModesMessage    (struct modesMessage *mm);
 void computeMagnitudeVector(uint16_t *pData);
-int  decodeCPR          (struct aircraft *a, int fflag, int surface);
-int  decodeCPRrelative  (struct aircraft *a, int fflag, int surface);
+int decodeCPRsurface(double reflat, double reflon,
+                     int even_cprlat, int even_cprlon,
+                     int odd_cprlat, int odd_cprlon,
+                     int fflag,
+                     double *out_lat, double *out_lon);
+int decodeCPRairborne(int even_cprlat, int even_cprlon,
+                      int odd_cprlat, int odd_cprlon,
+                      int fflag,
+                      double *out_lat, double *out_lon);
+int  decodeCPRrelative(double reflat, double reflon,
+                       int cprlat, int cprlon,
+                       int fflag, int surface,
+                       double *out_lat, double *out_lon);
 int modesMessageLenByType(int type);
 
 // From crc.c:

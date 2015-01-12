@@ -176,6 +176,62 @@ void interactiveUpdateAircraftModeS() {
 //
 // Receive new messages and populate the interactive mode with more info
 //
+static int doGlobalCPR(struct aircraft *a, int fflag, int surface)
+{
+    if (surface) {
+        // surface global CPR
+        // find reference location
+        double reflat, reflon;
+
+        if (a->bFlags & MODES_ACFLAGS_LATLON_REL_OK) { // Ok to try aircraft relative first
+            reflat = a->lat;
+            reflon = a->lon;
+        } else if (Modes.bUserFlags & MODES_USER_LATLON_VALID) {
+            reflat = Modes.fUserLat;
+            reflon = Modes.fUserLon;
+        } else {
+            // No local reference, give up
+            return (-1);
+        }
+
+        return decodeCPRsurface(reflat, reflon,
+                                a->even_cprlat, a->even_cprlon,
+                                a->odd_cprlat, a->odd_cprlon,
+                                fflag,
+                                &a->lat, &a->lon);
+    } else {
+        // airborne global CPR
+        return decodeCPRairborne(a->even_cprlat, a->even_cprlon,
+                                 a->odd_cprlat, a->odd_cprlon,
+                                 fflag,
+                                 &a->lat, &a->lon);
+    }
+}
+
+static int doLocalCPR(struct aircraft *a, int fflag, int surface)
+{
+    // relative CPR
+    // find reference location
+    double reflat, reflon;
+
+    if (a->bFlags & MODES_ACFLAGS_LATLON_REL_OK) {
+        reflat = a->lat;
+        reflon = a->lon;
+    } else if (!surface && (Modes.bUserFlags & MODES_USER_LATLON_VALID)) {
+        reflat = Modes.fUserLat;
+        reflon = Modes.fUserLon;
+    } else {
+        // No local reference, give up
+        return (-1);
+    }
+
+    return decodeCPRrelative(reflat, reflon,
+                             fflag ? a->odd_cprlat : a->even_cprlat,
+                             fflag ? a->odd_cprlon : a->even_cprlon,
+                             fflag, surface,
+                             &a->lat, &a->lon);
+}
+
 struct aircraft *interactiveReceiveData(struct modesMessage *mm) {
     struct aircraft *a, *aux;
 
@@ -273,11 +329,11 @@ struct aircraft *interactiveReceiveData(struct modesMessage *mm) {
 
         // If we have enough recent data, try global CPR
         if (((mm->bFlags | a->bFlags) & MODES_ACFLAGS_LLEITHER_VALID) == MODES_ACFLAGS_LLBOTH_VALID && abs((int)(a->even_cprtime - a->odd_cprtime)) <= 10000)
-            location_result = decodeCPR(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG));
+            location_result = doGlobalCPR(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG));
 
         // Otherwise try relative CPR.
         if (location_result == -1)
-            location_result = decodeCPRrelative(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG));
+            location_result = doLocalCPR(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG));
 
         // If we sucessfully decoded, back copy the results to mm so that we can print them in list output
         if (location_result == 0) {

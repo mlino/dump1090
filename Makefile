@@ -27,5 +27,11 @@ dump1090: dump1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filte
 view1090: view1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filter.o crc.o
 	$(CC) -g -o $@ $^ $(LIBS) $(LDFLAGS)
 
+cprtests: anet.o interactive.o mode_ac.o net_io.o icao_filter.o crc.o mode_s.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(EXTRACFLAGS) -DCPR_TESTS $^ -o $@ $(LIBS)
+
+test: cprtests
+	./cprtests
+
 clean:
 	rm -f *.o dump1090 view1090
