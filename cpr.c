@@ -38,9 +38,16 @@
 //
 // Always positive MOD operation, used for CPR decoding.
 //
-double cprModFunction(double a, double b) {
-    double r = fmod(a,b);
-    return signbit(r) ? r+b : r;
+static int cprModInt(int a, int b) {
+    int res = a % b;
+    if (res < 0) res += b;
+    return res;
+}
+
+static double cprModDouble(double a, double b) {
+    double res = fmod(a, b);
+    if (res < 0) res += b;
+    return res;
 }
 
 //
@@ -48,7 +55,7 @@ double cprModFunction(double a, double b) {
 //
 // The NL function uses the precomputed table from 1090-WP-9-14
 //
-int cprNLFunction(double lat) {
+static int cprNLFunction(double lat) {
     if (lat < 0) lat = -lat; // Table is simmetric about the equator
     if (lat < 10.47047130) return 59;
     if (lat < 14.82817437) return 58;
@@ -113,7 +120,7 @@ int cprNLFunction(double lat) {
 //
 //=========================================================================
 //
-int cprNFunction(double lat, int fflag) {
+static int cprNFunction(double lat, int fflag) {
     int nl = cprNLFunction(lat) - (fflag ? 1 : 0);
     if (nl < 1) nl = 1;
     return nl;
@@ -121,7 +128,7 @@ int cprNFunction(double lat, int fflag) {
 //
 //=========================================================================
 //
-double cprDlonFunction(double lat, int fflag, int surface) {
+static double cprDlonFunction(double lat, int fflag, int surface) {
     return (surface ? 90.0 : 360.0) / cprNFunction(lat, fflag);
 }
 //
@@ -149,8 +156,8 @@ int decodeCPRairborne(int even_cprlat, int even_cprlon,
 
     // Compute the Latitude Index "j"
     int    j     = (int) floor(((59*lat0 - 60*lat1) / 131072) + 0.5);
-    double rlat0 = AirDlat0 * (cprModFunction(j,60) + lat0 / 131072);
-    double rlat1 = AirDlat1 * (cprModFunction(j,59) + lat1 / 131072);
+    double rlat0 = AirDlat0 * (cprModInt(j,60) + lat0 / 131072);
+    double rlat1 = AirDlat1 * (cprModInt(j,59) + lat1 / 131072);
 
     if (rlat0 >= 270) rlat0 -= 360;
     if (rlat1 >= 270) rlat1 -= 360;
@@ -168,13 +175,13 @@ int decodeCPRairborne(int even_cprlat, int even_cprlon,
         int ni = cprNFunction(rlat1,1);
         int m = (int) floor((((lon0 * (cprNLFunction(rlat1)-1)) -
                               (lon1 * cprNLFunction(rlat1))) / 131072.0) + 0.5);
-        rlon = cprDlonFunction(rlat1, 1, 0) * (cprModFunction(m, ni)+lon1/131072);
+        rlon = cprDlonFunction(rlat1, 1, 0) * (cprModInt(m, ni)+lon1/131072);
         rlat = rlat1;
     } else {     // Use even packet.
         int ni = cprNFunction(rlat0,0);
         int m = (int) floor((((lon0 * (cprNLFunction(rlat0)-1)) -
                               (lon1 * cprNLFunction(rlat0))) / 131072) + 0.5);
-        rlon = cprDlonFunction(rlat0, 0, 0) * (cprModFunction(m, ni)+lon0/131072);
+        rlon = cprDlonFunction(rlat0, 0, 0) * (cprModInt(m, ni)+lon0/131072);
         rlat = rlat0;
     }
 
@@ -203,8 +210,8 @@ int decodeCPRsurface(double reflat, double reflon,
 
     // Compute the Latitude Index "j"
     int    j     = (int) floor(((59*lat0 - 60*lat1) / 131072) + 0.5);
-    double rlat0 = AirDlat0 * (cprModFunction(j,60) + lat0 / 131072);
-    double rlat1 = AirDlat1 * (cprModFunction(j,59) + lat1 / 131072);
+    double rlat0 = AirDlat0 * (cprModInt(j,60) + lat0 / 131072);
+    double rlat1 = AirDlat1 * (cprModInt(j,59) + lat1 / 131072);
 
     // Pick the quadrant that's closest to the reference location -
     // this is not necessarily the same quadrant that contains the
@@ -242,13 +249,13 @@ int decodeCPRsurface(double reflat, double reflon,
         int ni = cprNFunction(rlat1,1);
         int m = (int) floor((((lon0 * (cprNLFunction(rlat1)-1)) -
                               (lon1 * cprNLFunction(rlat1))) / 131072.0) + 0.5);
-        rlon = cprDlonFunction(rlat1, 1, 1) * (cprModFunction(m, ni)+lon1/131072);
+        rlon = cprDlonFunction(rlat1, 1, 1) * (cprModInt(m, ni)+lon1/131072);
         rlat = rlat1;
     } else {     // Use even packet.
         int ni = cprNFunction(rlat0,0);
         int m = (int) floor((((lon0 * (cprNLFunction(rlat0)-1)) -
                               (lon1 * cprNLFunction(rlat0))) / 131072) + 0.5);
-        rlon = cprDlonFunction(rlat0, 0, 1) * (cprModFunction(m, ni)+lon0/131072);
+        rlon = cprDlonFunction(rlat0, 0, 1) * (cprModInt(m, ni)+lon0/131072);
         rlat = rlat0;
     }
 
@@ -295,7 +302,7 @@ int decodeCPRrelative(double reflat, double reflon,
 
     // Compute the Latitude Index "j"
     j = (int) (floor(reflat/AirDlat) +
-               floor(0.5 + cprModFunction(reflat, AirDlat)/AirDlat - fractional_lat));
+               floor(0.5 + cprModDouble(reflat, AirDlat)/AirDlat - fractional_lat));
     rlat = AirDlat * (j + fractional_lat);
     if (rlat >= 270) rlat -= 360;
 
@@ -312,7 +319,7 @@ int decodeCPRrelative(double reflat, double reflon,
     // Compute the Longitude Index "m"
     AirDlon = cprDlonFunction(rlat, fflag, surface);
     m = (int) (floor(reflon/AirDlon) +
-               floor(0.5 + cprModFunction(reflon, AirDlon)/AirDlon - fractional_lon));
+               floor(0.5 + cprModDouble(reflon, AirDlon)/AirDlon - fractional_lon));
     rlon = AirDlon * (m + fractional_lon);
     if (rlon > 180) rlon -= 360;
 
@@ -331,7 +338,7 @@ int decodeCPRrelative(double reflat, double reflon,
 #include <stdio.h>
 
 // Global, airborne CPR test data:
-struct { 
+static const struct {
     int even_cprlat, even_cprlon;   // input: raw CPR values, even message
     int odd_cprlat, odd_cprlon;     // input: raw CPR values, odd message
     int even_result;                // verify: expected result from decoding with fflag=0 (even message is latest)
@@ -346,7 +353,7 @@ struct {
 };
 
 // Global, surface CPR test data:
-struct {
+static const struct {
     double reflat, reflon;          // input: reference location for decoding
     int even_cprlat, even_cprlon;   // input: raw CPR values, even message
     int odd_cprlat, odd_cprlon;     // input: raw CPR values, odd message
@@ -383,7 +390,7 @@ struct {
 };
 
 // Relative CPR test data:
-struct {
+static const struct {
     double reflat, reflon;          // input: reference location for decoding
     int cprlat, cprlon;             // input: raw CPR values, even or odd message
     int fflag;                      // input: fflag in raw message
@@ -448,7 +455,7 @@ struct {
 
 };
 
-int testCPRGlobalAirborne() {
+static int testCPRGlobalAirborne() {
     int ok = 1;
     unsigned i;
     for (i = 0; i < sizeof(cprGlobalAirborneTests)/sizeof(cprGlobalAirborneTests[0]); ++i) {
@@ -505,7 +512,7 @@ int testCPRGlobalAirborne() {
     return ok;
 }
 
-int testCPRGlobalSurface() {
+static int testCPRGlobalSurface() {
     int ok = 1;
     unsigned i;
     for (i = 0; i < sizeof(cprGlobalSurfaceTests)/sizeof(cprGlobalSurfaceTests[0]); ++i) {
@@ -566,7 +573,7 @@ int testCPRGlobalSurface() {
     return ok;
 }
 
-int testCPRRelative() {
+static int testCPRRelative() {
     int ok = 1;
     unsigned i;
     for (i = 0; i < sizeof(cprRelativeTests)/sizeof(cprRelativeTests[0]); ++i) {
