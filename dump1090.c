@@ -613,38 +613,43 @@ static void display_stats(void) {
 
     printf("Statistics as at %s", ctime(&now));
 
-    printf("%d sample blocks processed\n",                    Modes.stat_blocks_processed);
-    printf("%d sample blocks dropped\n",                      Modes.stat_blocks_dropped);
+    if (!Modes.net_only) {
+        printf("%d sample blocks processed\n",                    Modes.stat_blocks_processed);
+        printf("%d sample blocks dropped\n",                      Modes.stat_blocks_dropped);
 
-    if (Modes.stat_blocks_processed > 0) {
-        long cpu_millis = (long)Modes.stat_cputime.tv_sec*1000L + Modes.stat_cputime.tv_nsec/1000000L;
-        long sample_millis = (long) ((uint64_t)Modes.stat_blocks_processed * MODES_ASYNC_BUF_SAMPLES / (Modes.oversample ? 2400 : 2000));
-        printf("%ld ms CPU time used to process %ld ms samples, %.1f%% load\n",
-               cpu_millis, sample_millis, 100.0 * cpu_millis / sample_millis);
+        if (Modes.stat_blocks_processed > 0) {
+            long cpu_millis = (long)Modes.stat_cputime.tv_sec*1000L + Modes.stat_cputime.tv_nsec/1000000L;
+            long sample_millis = (long) ((uint64_t)Modes.stat_blocks_processed * MODES_ASYNC_BUF_SAMPLES / (Modes.oversample ? 2400 : 2000));
+            printf("%ld ms CPU time used to process %ld ms samples, %.1f%% load\n",
+                   cpu_millis, sample_millis, 100.0 * cpu_millis / sample_millis);
+        }
+
+        printf("%d ModeA/C detected\n",                           Modes.stat_ModeAC);
+        printf("%d Mode-S preambles with poor correlation\n",     Modes.stat_preamble_no_correlation);
+        printf("%d Mode-S preambles with noise in the quiet period\n", Modes.stat_preamble_not_quiet);
+        printf("%d valid Mode-S preambles\n",                     Modes.stat_valid_preamble);
+        for (j = 0; j < MODES_MAX_PHASE_STATS; ++j)
+            if (Modes.stat_preamble_phase[j] > 0)
+                printf("   %d with phase offset %d\n",                Modes.stat_preamble_phase[j], j);
+        printf("%d DF-?? fields corrected for length\n",          Modes.stat_DF_Len_Corrected);
+        printf("%d DF-?? fields corrected for type\n",            Modes.stat_DF_Type_Corrected);
+        
+        display_demod_stats("", &Modes.stat_demod);
+        if (Modes.phase_enhance) {
+            printf("%d phase enhancement attempts\n",                 Modes.stat_out_of_phase);
+            display_demod_stats("phase enhanced ", &Modes.stat_demod_phasecorrected);
+        }
+        
+        printf("%d total usable messages\n",
+               Modes.stat_demod.goodcrc + Modes.stat_demod_phasecorrected.goodcrc +
+               Modes.stat_demod.fixed + Modes.stat_demod_phasecorrected.fixed);
+
+        if (Modes.stat_noise_count) {
+            printf("Noise floor: %.1f dBFS\n",
+                   10 * log10(Modes.stat_noise_power / Modes.stat_noise_count) - 96.33); // 96.33 is 10log10(65536 ** 2) (full range power)
+        }
     }
 
-    printf("%d ModeA/C detected\n",                           Modes.stat_ModeAC);
-    printf("%d Mode-S preambles with poor correlation\n",     Modes.stat_preamble_no_correlation);
-    printf("%d Mode-S preambles with noise in the quiet period\n", Modes.stat_preamble_not_quiet);
-    printf("%d valid Mode-S preambles\n",                     Modes.stat_valid_preamble);
-    for (j = 0; j < MODES_MAX_PHASE_STATS; ++j)
-        if (Modes.stat_preamble_phase[j] > 0)
-            printf("   %d with phase offset %d\n",                Modes.stat_preamble_phase[j], j);
-    printf("%d DF-?? fields corrected for length\n",          Modes.stat_DF_Len_Corrected);
-    printf("%d DF-?? fields corrected for type\n",            Modes.stat_DF_Type_Corrected);
-
-    display_demod_stats("", &Modes.stat_demod);
-    if (Modes.phase_enhance) {
-        printf("%d phase enhancement attempts\n",                 Modes.stat_out_of_phase);
-        display_demod_stats("phase enhanced ", &Modes.stat_demod_phasecorrected);
-    }
-
-    printf("%d total usable messages\n",
-           Modes.stat_demod.goodcrc + Modes.stat_demod_phasecorrected.goodcrc +
-           Modes.stat_demod.fixed + Modes.stat_demod_phasecorrected.fixed);
-
-    printf("Noise floor: %.1f dBFS\n",
-           10 * log10(Modes.stat_noise_power / Modes.stat_noise_count) - 96.33); // 96.33 is 10log10(65536 ** 2) (full range power)
     printf("%d remote messages accepted\n"
            "%d remote messages rejected\n",
            Modes.stat_remote_accepted,
