@@ -754,7 +754,7 @@ static void decodeExtendedSquitter(struct modesMessage *mm)
     case 0: // Airborne position, baro altitude only
     case 9: case 10: case 11: case 12: case 13: case 14: case 15: case 16: case 17: case 18: // Airborne position, baro
     case 20: case 21: case 22: { // Airborne position, GNSS HAE       
-        int AC12Field;
+        int AC12Field = ((msg[5] << 4) | (msg[6] >> 4)) & 0x0FFF;
 
         mm->bFlags |= MODES_ACFLAGS_AOG_VALID;
 
@@ -765,10 +765,12 @@ static void decodeExtendedSquitter(struct modesMessage *mm)
             mm->raw_latitude  = ((msg[6] & 3) << 15) | (msg[7] << 7) | (msg[8] >> 1);
             mm->raw_longitude = ((msg[8] & 1) << 16) | (msg[9] << 8) | (msg[10]);
 
-            if ((mm->raw_longitude == 0) && ((mm->raw_latitude & 0xfff) == 0) && mm->metype == 15) {
-                // 400F3F (Eurocopter ECC155 B1)
-                // longitude == 0 with type == 15 and zeros in latitude LSB.
-                // Alternates with valid reports having type == 14
+            if (!(mm->msg[6] & 0x04) && AC12Field == 0 && mm->raw_longitude == 0 && (mm->raw_latitude & 0x0fff) == 0 && mm->metype == 15) {
+                // Seen from at least:
+                //   400F3F (Eurocopter ECC155 B1)
+                //   4008F3 (BAE ATP)
+                // F=0 (even), altitude == 0, longitude == 0, type == 15 and zeros in latitude LSB.
+                // Can alternate with valid reports having type == 14
                 Modes.stat_cpr_filtered++;
             } else {
                 // Otherwise, assume it's valid.
@@ -777,7 +779,6 @@ static void decodeExtendedSquitter(struct modesMessage *mm)
             }
         }
 
-        AC12Field = ((msg[5] << 4) | (msg[6] >> 4)) & 0x0FFF;
         if (AC12Field) {// Only attempt to decode if a valid (non zero) altitude is present
             mm->bFlags |= MODES_ACFLAGS_ALTITUDE_VALID;
             mm->altitude = decodeAC12Field(AC12Field, &mm->unit);
