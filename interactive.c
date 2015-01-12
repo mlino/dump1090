@@ -259,7 +259,7 @@ struct aircraft *interactiveReceiveData(struct modesMessage *mm) {
 
     // If we've got a new cprlat or cprlon
     if (mm->bFlags & MODES_ACFLAGS_LLEITHER_VALID) {
-        int location_ok = 0;
+        int location_result = -1;  // -1: not found yet; 0: found; -2: bad data
 
         if (mm->bFlags & MODES_ACFLAGS_LLODD_VALID) {
             a->odd_cprlat  = mm->raw_latitude;
@@ -272,22 +272,32 @@ struct aircraft *interactiveReceiveData(struct modesMessage *mm) {
         }
 
         // If we have enough recent data, try global CPR
-        if (((mm->bFlags | a->bFlags) & MODES_ACFLAGS_LLEITHER_VALID) == MODES_ACFLAGS_LLBOTH_VALID && abs((int)(a->even_cprtime - a->odd_cprtime)) <= 10000) {
-            if (decodeCPR(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG)) == 0) {
-                location_ok = 1;
-            }
-        }
+        if (((mm->bFlags | a->bFlags) & MODES_ACFLAGS_LLEITHER_VALID) == MODES_ACFLAGS_LLBOTH_VALID && abs((int)(a->even_cprtime - a->odd_cprtime)) <= 10000)
+            location_result = decodeCPR(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG));
 
         // Otherwise try relative CPR.
-        if (!location_ok && decodeCPRrelative(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG)) == 0) {
-            location_ok = 1;
-        }
+        if (location_result == -1)
+            location_result = decodeCPRrelative(a, (mm->bFlags & MODES_ACFLAGS_LLODD_VALID), (mm->bFlags & MODES_ACFLAGS_AOG));
 
-        //If we sucessfully decoded, back copy the results to mm so that we can print them in list output
-        if (location_ok) {
+        // If we sucessfully decoded, back copy the results to mm so that we can print them in list output
+        if (location_result == 0) {
             mm->bFlags |= MODES_ACFLAGS_LATLON_VALID;
             mm->fLat    = a->lat;
             mm->fLon    = a->lon;
+        } else if (location_result == -1) {
+            // CPR failed because either:
+            //  (a) global CPR, surface position, and no reference position available;
+            //  (b) relative CPR, no reference position available;
+            //  (c) relative CPR, implausible result
+            //
+            // None of these indicate bad data, just that we couldn't resolve the position
+            // at the moment. Keep what info we have and continue.
+        } else if (location_result == -2) {
+            // Global CPR failed because an airborne position produced implausible results.
+            // This is bad data. Discard both odd and even messages and wait for a fresh pair.
+            // Also disable aircraft-relative positions until we have a new good position.
+            mm->bFlags &= ~(MODES_ACFLAGS_LATLON_VALID | MODES_ACFLAGS_LLODD_VALID | MODES_ACFLAGS_LLEVEN_VALID);
+            a->bFlags &= ~(MODES_ACFLAGS_LATLON_REL_OK | MODES_ACFLAGS_LLODD_VALID | MODES_ACFLAGS_LLEVEN_VALID);
         }
     }
 

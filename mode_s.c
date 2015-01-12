@@ -1249,13 +1249,12 @@ int decodeCPR(struct aircraft *a, int fflag, int surface) {
     double rlat0 = AirDlat0 * (cprModFunction(j,60) + lat0 / 131072);
     double rlat1 = AirDlat1 * (cprModFunction(j,59) + lat1 / 131072);
 
-    time_t now = time(NULL);
     double surface_rlat = MODES_USER_LATITUDE_DFLT;
     double surface_rlon = MODES_USER_LONGITUDE_DFLT;
 
     if (surface) {
         // If we're on the ground, make sure we have a (likely) valid Lat/Lon
-        if ((a->bFlags & MODES_ACFLAGS_LATLON_VALID) && (((int)(now - a->seenLatLon)) < Modes.interactive_display_ttl)) {
+        if (a->bFlags & MODES_ACFLAGS_LATLON_REL_OK) { // Ok to try aircraft relative first
             surface_rlat = a->lat;
             surface_rlon = a->lon;
         } else if (Modes.bUserFlags & MODES_USER_LATLON_VALID) {
@@ -1274,11 +1273,11 @@ int decodeCPR(struct aircraft *a, int fflag, int surface) {
 
     // Check to see that the latitude is in range: -90 .. +90
     if (rlat0 < -90 || rlat0 > 90 || rlat1 < -90 || rlat1 > 90)
-        return (-1);
+        return (-2); // bad data
 
     // Check that both are in the same latitude zone, or abort.
     if (cprNLFunction(rlat0) != cprNLFunction(rlat1))
-        return (-1);
+        return (-2); // bad data
 
     // Compute ni and the Longitude Index "m"
     if (fflag) { // Use odd packet.
@@ -1356,16 +1355,12 @@ int decodeCPRrelative(struct aircraft *a, int fflag, int surface) {
     if (rlat >= 270) rlat -= 360;
 
     // Check to see that the latitude is in range: -90 .. +90
-    if (rlat < -90 || rlat > 90) {
-        a->bFlags &= ~MODES_ACFLAGS_LATLON_REL_OK; // This will cause a quick exit next time if no global has been done
+    if (rlat < -90 || rlat > 90)
         return (-1);                               // Time to give up - Latitude error
-    }
 
     // Check to see that answer is reasonable - ie no more than 1/2 cell away 
-    if (fabs(rlat - a->lat) > (AirDlat/2)) {
-        a->bFlags &= ~MODES_ACFLAGS_LATLON_REL_OK; // This will cause a quick exit next time if no global has been done
+    if (fabs(rlat - a->lat) > (AirDlat/2))
         return (-1);                               // Time to give up - Latitude error 
-    }
 
     // Compute the Longitude Index "m"
     AirDlon = cprDlonFunction(rlat, fflag, surface);
@@ -1375,17 +1370,15 @@ int decodeCPRrelative(struct aircraft *a, int fflag, int surface) {
     if (rlon > 180) rlon -= 360;
 
     // Check to see that answer is reasonable - ie no more than 1/2 cell away
-    if (fabs(rlon - a->lon) > (AirDlon/2)) {
-        a->bFlags &= ~MODES_ACFLAGS_LATLON_REL_OK; // This will cause a quick exit next time if no global has been done
+    if (fabs(rlon - a->lon) > (AirDlon/2))
         return (-1);                               // Time to give up - Longitude error
-    }
 
     a->lat = rlat;
     a->lon = rlon;
 
     a->seenLatLon      = a->seen;
     a->timestampLatLon = a->timestamp;
-    a->bFlags         |= (MODES_ACFLAGS_LATLON_VALID | MODES_ACFLAGS_LATLON_REL_OK);
+    a->bFlags         |= (MODES_ACFLAGS_LATLON_VALID); // don't set REL_OK, we don't want to do relative-to-relative
     return (0);
 }
 //
