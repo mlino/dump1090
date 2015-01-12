@@ -599,6 +599,7 @@ static int testCPRRelative() {
         res = decodeCPRrelative(cprRelativeTests[i].reflat, cprRelativeTests[i].reflon,
                                 cprRelativeTests[i].cprlat, cprRelativeTests[i].cprlon,
                                 cprRelativeTests[i].fflag, cprRelativeTests[i].surface,
+                                0.0,
                                 &rlat, &rlon);
         if (res != cprRelativeTests[i].result
             || fabs(rlat - cprRelativeTests[i].rlat) > 1e-6
