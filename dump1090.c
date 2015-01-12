@@ -684,8 +684,8 @@ static void display_stats(void) {
         Modes.stat_DF_Type_Corrected = 
         Modes.stat_out_of_phase = 0;
 
-    Modes.stat.remote_accepted =
-        Modes.stat.remote_rejected = 0;
+    Modes.stat_remote_accepted =
+        Modes.stat_remote_rejected = 0;
 
     Modes.stat_noise_power = 0;
     Modes.stat_noise_count = 0;
