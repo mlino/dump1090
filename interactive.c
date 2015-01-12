@@ -213,13 +213,23 @@ static int doLocalCPR(struct aircraft *a, int fflag, int surface)
     // relative CPR
     // find reference location
     double reflat, reflon;
+    double range_limit;
 
     if (a->bFlags & MODES_ACFLAGS_LATLON_REL_OK) {
+        int elapsed = (int)(time(NULL) - a->seenLatLon);
+        if (elapsed < 0) elapsed = 0;
+
         reflat = a->lat;
         reflon = a->lon;
+
+        // impose a range limit based on 2000km/h speed
+        range_limit = 10e3 + (2000e3 * elapsed / 3600); // 10km + 2000km/h
+        if (range_limit > 300e3)
+            range_limit = 300e3; // max 300km = 160NN
     } else if (!surface && (Modes.bUserFlags & MODES_USER_LATLON_VALID)) {
         reflat = Modes.fUserLat;
         reflon = Modes.fUserLon;
+        range_limit = 100e3; // 100km, about 60NM, this is OK for a receiver with range of about 180 + (180-60)/2  = 240NM.
     } else {
         // No local reference, give up
         return (-1);
@@ -229,6 +239,7 @@ static int doLocalCPR(struct aircraft *a, int fflag, int surface)
                              fflag ? a->odd_cprlat : a->even_cprlat,
                              fflag ? a->odd_cprlon : a->even_cprlon,
                              fflag, surface,
+                             range_limit,
                              &a->lat, &a->lon);
 }
 

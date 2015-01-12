@@ -32,6 +32,7 @@
 //
 
 #include <math.h>
+#include <stdio.h>
 
 //
 //=========================================================================
@@ -275,6 +276,15 @@ int decodeCPRsurface(double reflat, double reflon,
     return 0;
 }
 
+// spherical earth, close enough..
+static double greatcircle(double lat0, double lon0, double lat1, double lon1)
+{
+    lat0 = lat0 * M_PI / 180.0;
+    lon0 = lon0 * M_PI / 180.0;
+    lat1 = lat1 * M_PI / 180.0;
+    lon1 = lon1 * M_PI / 180.0;
+    return 6371e3 * acos(sin(lat0) * sin(lat1) + cos(lat0) * cos(lat1) * cos(fabs(lon0 - lon1)));
+}
 
 //
 //=========================================================================
@@ -289,6 +299,7 @@ int decodeCPRsurface(double reflat, double reflon,
 int decodeCPRrelative(double reflat, double reflon,
                       int cprlat, int cprlon,
                       int fflag, int surface,
+                      double range_limit,
                       double *out_lat, double *out_lon)
 {
     double AirDlat;
@@ -327,6 +338,13 @@ int decodeCPRrelative(double reflat, double reflon,
     if (fabs(rlon - reflon) > (AirDlon/2))
         return (-1);                               // Time to give up - Longitude error
 
+    // If a range limit is specified, check that we're within it
+    if (range_limit > 0 && greatcircle(rlat, rlon, reflat, reflon) > range_limit) {
+        //fprintf(stderr, "range limit hit: %.3f,%.3f -> %.3f,%.3f = %.1fkm, limit = %.1fkm\n",
+        //        rlat, rlon, reflat, reflon, greatcircle(rlat, rlon, reflat, reflon)/1e3, range_limit/1e3);
+        return (-1); // out of range
+    }
+
     *out_lat = rlat;
     *out_lon = rlon;
     return (0);
@@ -334,8 +352,6 @@ int decodeCPRrelative(double reflat, double reflon,
 
 #ifdef CPR_TESTS
 // This is used by "make test"
-
-#include <stdio.h>
 
 // Global, airborne CPR test data:
 static const struct {

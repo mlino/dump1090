@@ -485,6 +485,7 @@ int decodeCPRairborne(int even_cprlat, int even_cprlon,
 int  decodeCPRrelative(double reflat, double reflon,
                        int cprlat, int cprlon,
                        int fflag, int surface,
+                       double range_limit,
                        double *out_lat, double *out_lon);
 int modesMessageLenByType(int type);
 
