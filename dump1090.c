@@ -645,6 +645,10 @@ static void display_stats(void) {
 
     printf("Noise floor: %.1f dBFS\n",
            10 * log10(Modes.stat_noise_power / Modes.stat_noise_count) - 96.33); // 96.33 is 10log10(65536 ** 2) (full range power)
+    printf("%d remote messages accepted\n"
+           "%d remote messages rejected\n",
+           Modes.stat_remote_accepted,
+           Modes.stat_remote_rejected);
 
     fflush(stdout);
 
@@ -661,6 +665,9 @@ static void display_stats(void) {
         Modes.stat_DF_Len_Corrected =
         Modes.stat_DF_Type_Corrected = 
         Modes.stat_out_of_phase = 0;
+
+    Modes.stat.remote_accepted =
+        Modes.stat.remote_rejected = 0;
 
     Modes.stat_noise_power = 0;
     Modes.stat_noise_count = 0;

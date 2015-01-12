@@ -383,6 +383,10 @@ struct {                             // Internal state
 
     struct timespec stat_cputime;
 
+    // remote messages:
+    unsigned int stat_remote_accepted;
+    unsigned int stat_remote_rejected;
+
     // noise floor:
     uint64_t stat_noise_power;
     uint32_t stat_noise_count;

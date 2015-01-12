@@ -558,9 +558,10 @@ int decodeBinMessage(struct client *c, char *p) {
             decodeModeAMessage(&mm, ((msg[0] << 8) | msg[1]));
         } else {
             if (decodeModesMessage(&mm, msg) < 0) {
-                fprintf(stdout, "Rejecting inbound message!");
-                displayModesMessage(&mm);
+                Modes.stat_remote_rejected++;
                 return 0;
+            } else {
+                Modes.stat_remote_accepted++;
             }
         }
 
