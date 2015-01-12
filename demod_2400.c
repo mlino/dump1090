@@ -474,8 +474,13 @@ void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
             }
         }
             
-        // Skip over the message
-        j += (16 + msglen)*6/5 - 1;
+        // Skip over the message:
+        // (we actually skip to 8 bits before the end of the message,
+        //  because we can often decode two messages that *almost* collide,
+        //  where the preamble of the second message clobbered the last
+        //  few bits of the first message, but the message bits didn't
+        //  overlap)
+        j += (8 + msglen - 8)*12/5 - 1;
 #if 0
         fprintf(stdout, "skipped to %d", j);
 #endif
