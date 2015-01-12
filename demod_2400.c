@@ -376,6 +376,12 @@ void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
 
             // See what length this message should be, and check that we got enough
             // bits before giving up for that to work.
+
+            if (i < 8) {
+                // Didn't even make it past the first byte
+                continue;
+            }
+
             msglen = modesMessageLenByType(msg[0] >> 3);
             if (i < msglen) {
                 // Bailed out because of too many errors before we got the full message.

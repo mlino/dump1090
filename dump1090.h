@@ -288,7 +288,7 @@ struct {                             // Internal state
     int             iDataReady;      // Fifo content count
     int             iDataLost;       // Count of missed buffers
 
-    int             trailing_space;  // extra trailing space needed by magnitude buffer
+    int             trailing_samples;// extra trailing samples in magnitude buffer
 
     uint16_t       *pFileData;       // Raw IQ samples buffer (from a File)
     uint16_t       *magnitude;       // Magnitude vector
@@ -461,7 +461,7 @@ int  ModeAToModeC      (unsigned int ModeA);
 // Functions exported from mode_s.c
 //
 void detectModeS        (uint16_t *m, uint32_t mlen);
-void detectModeS_oversample (uint16_t *m, uint32_t mlen);
+void detectModeS_oversample (uint16_t *m, int mlen);
 int scoreModesMessage (unsigned char *msg);
 int decodeModesMessage (struct modesMessage *mm, unsigned char *msg);
 void displayModesMessage(struct modesMessage *mm);
