@@ -1386,7 +1386,7 @@ int decodeCPRrelative(struct aircraft *a, int fflag, int surface) {
         return (-1);                               // Time to give up - Latitude error
 
     // Check to see that answer is reasonable - ie no more than 1/2 cell away 
-    if (fabs(rlat - a->lat) > (AirDlat/2))
+    if (fabs(rlat - latr) > (AirDlat/2))
         return (-1);                               // Time to give up - Latitude error 
 
     // Compute the Longitude Index "m"
@@ -1397,7 +1397,7 @@ int decodeCPRrelative(struct aircraft *a, int fflag, int surface) {
     if (rlon > 180) rlon -= 360;
 
     // Check to see that answer is reasonable - ie no more than 1/2 cell away
-    if (fabs(rlon - a->lon) > (AirDlon/2))
+    if (fabs(rlon - lonr) > (AirDlon/2))
         return (-1);                               // Time to give up - Longitude error
 
     a->lat = rlat;
