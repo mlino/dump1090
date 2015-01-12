@@ -1358,7 +1358,7 @@ int decodeCPRrelative(struct aircraft *a, int fflag, int surface) {
     if (a->bFlags & MODES_ACFLAGS_LATLON_REL_OK) { // Ok to try aircraft relative first
         latr = a->lat;
         lonr = a->lon;
-    } else if (Modes.bUserFlags & MODES_USER_LATLON_VALID) { // Try ground station relative next
+    } else if ( (Modes.bUserFlags & MODES_USER_LATLON_VALID) && !surface ) { // Try ground station relative next (but not if surface, it's too ambiguous)
         latr = Modes.fUserLat;
         lonr = Modes.fUserLon;
     } else {
