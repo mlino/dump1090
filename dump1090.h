@@ -150,6 +150,7 @@
 #define MODES_ACFLAGS_FS_VALID       (1<<13) // Aircraft Flight Status is known
 #define MODES_ACFLAGS_NSEWSPD_VALID  (1<<14) // Aircraft EW and NS Speed is known
 #define MODES_ACFLAGS_LATLON_REL_OK  (1<<15) // Indicates it's OK to do a relative CPR
+#define MODES_ACFLAGS_REL_CPR_USED   (1<<16) // (on message) relative CPR was used
 
 #define MODES_ACFLAGS_LLEITHER_VALID (MODES_ACFLAGS_LLEVEN_VALID | MODES_ACFLAGS_LLODD_VALID)
 #define MODES_ACFLAGS_LLBOTH_VALID   (MODES_ACFLAGS_LLEVEN_VALID | MODES_ACFLAGS_LLODD_VALID)
@@ -390,6 +391,14 @@ struct {                             // Internal state
     // noise floor:
     uint64_t stat_noise_power;
     uint32_t stat_noise_count;
+
+    // CPR decoding:
+    unsigned int stat_cpr_global_ok;
+    unsigned int stat_cpr_global_bad;
+    unsigned int stat_cpr_global_skipped;
+    unsigned int stat_cpr_local_ok;
+    unsigned int stat_cpr_local_skipped;
+    unsigned int stat_cpr_filtered;
 } Modes;
 
 // The struct we use to store information about a decoded message.

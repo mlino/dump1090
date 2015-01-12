@@ -650,6 +650,19 @@ static void display_stats(void) {
            Modes.stat_remote_accepted,
            Modes.stat_remote_rejected);
 
+    printf("%d global CPR attempts with valid positions\n"
+           "%d global CPR attempts with bad data\n"
+           "%d global CPR attempts with insufficient data\n"
+           "%d local CPR attempts with valid positions\n"
+           "%d local CPR attempts with insufficient data\n"
+           "%d CPR messages that look like transponder failures filtered\n",
+           Modes.stat_cpr_global_ok,
+           Modes.stat_cpr_global_bad,
+           Modes.stat_cpr_global_skipped,
+           Modes.stat_cpr_local_ok,
+           Modes.stat_cpr_local_skipped,
+           Modes.stat_cpr_filtered);
+
     fflush(stdout);
 
     Modes.stat_cputime.tv_sec = 0;
@@ -671,6 +684,13 @@ static void display_stats(void) {
 
     Modes.stat_noise_power = 0;
     Modes.stat_noise_count = 0;
+
+    Modes.stat_cpr_global_ok = 
+        Modes.stat_cpr_global_bad =
+        Modes.stat_cpr_global_skipped = 
+        Modes.stat_cpr_local_ok = 
+        Modes.stat_cpr_local_skipped = 
+        Modes.stat_cpr_filtered = 0;
 
     for (j = 0;  j < MODES_MAX_PHASE_STATS;  j++) {
         Modes.stat_preamble_phase[j] = 0;
