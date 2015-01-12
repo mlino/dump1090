@@ -21,17 +21,17 @@ all: dump1090 view1090
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(EXTRACFLAGS) -c $< -o $@
 
-dump1090: dump1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filter.o crc.o demod_2000.o demod_2400.o
+dump1090: dump1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filter.o crc.o cpr.o demod_2000.o demod_2400.o
 	$(CC) -g -o $@ $^ $(LIBS) $(LIBS_RTL) $(LDFLAGS)
 
-view1090: view1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filter.o crc.o
+view1090: view1090.o anet.o interactive.o mode_ac.o mode_s.o net_io.o icao_filter.o crc.o cpr.o
 	$(CC) -g -o $@ $^ $(LIBS) $(LDFLAGS)
 
-cprtests: anet.o interactive.o mode_ac.o net_io.o icao_filter.o crc.o mode_s.c
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(EXTRACFLAGS) -DCPR_TESTS $^ -o $@ $(LIBS)
+cprtests: cpr.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(EXTRACFLAGS) -DCPR_TESTS $^ -o $@ -lm
 
 test: cprtests
 	./cprtests
 
 clean:
-	rm -f *.o dump1090 view1090
+	rm -f *.o dump1090 view1090 cprtests
