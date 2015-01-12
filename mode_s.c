@@ -1237,6 +1237,8 @@ double cprDlonFunction(double lat, int fflag, int surface) {
 // 1) 131072 is 2^17 since CPR latitude and longitude are encoded in 17 bits.
 //
 int decodeCPR(struct aircraft *a, int fflag, int surface) {
+    double surface_rlat = 0, surface_rlon = 0;
+
     double AirDlat0 = (surface ? 90.0 : 360.0) / 60.0;
     double AirDlat1 = (surface ? 90.0 : 360.0) / 59.0;
     double lat0 = a->even_cprlat;
@@ -1248,9 +1250,6 @@ int decodeCPR(struct aircraft *a, int fflag, int surface) {
     int    j     = (int) floor(((59*lat0 - 60*lat1) / 131072) + 0.5);
     double rlat0 = AirDlat0 * (cprModFunction(j,60) + lat0 / 131072);
     double rlat1 = AirDlat1 * (cprModFunction(j,59) + lat1 / 131072);
-
-    double surface_rlat = MODES_USER_LATITUDE_DFLT;
-    double surface_rlon = MODES_USER_LONGITUDE_DFLT;
 
     if (surface) {
         // If we're on the ground, make sure we have a (likely) valid Lat/Lon
@@ -1264,8 +1263,29 @@ int decodeCPR(struct aircraft *a, int fflag, int surface) {
             // No local reference, give up
             return (-1);
         }
-        rlat0 += floor(surface_rlat / 90.0) * 90.0;  // Move from 1st quadrant to our quadrant
-        rlat1 += floor(surface_rlat / 90.0) * 90.0;
+
+        // Pick the quadrant that's closest to the reference location -
+        // this is not necessarily the same quadrant that contains the
+        // reference location.
+        //
+        // There are also only two valid quadrants: -90..0 and 0..90;
+        // no correct message would try to encoding a latitude in the
+        // ranges -180..-90 and 90..180.
+        //
+        // If the computed latitude is more than 45 degrees north of
+        // the reference latitude (using the northern hemisphere
+        // solution), then the southern hemisphere solution will be
+        // closer to the refernce latitude.
+        //
+        // e.g. surface_rlat=0, rlat=44, use rlat=44
+        //      surface_rlat=0, rlat=46, use rlat=46-90 = -44
+        //      surface_rlat=40, rlat=84, use rlat=84
+        //      surface_rlat=40, rlat=86, use rlat=86-90 = -4
+        //      surface_rlat=-40, rlat=4, use rlat=4
+        //      surface_rlat=-40, rlat=6, use rlat=6-90 = -84
+
+        if ( (rlat0 - surface_rlat) > 45 ) rlat0 -= 90;
+        if ( (rlat1 - surface_rlat) > 45 ) rlat1 -= 90;
     } else {
         if (rlat0 >= 270) rlat0 -= 360;
         if (rlat1 >= 270) rlat1 -= 360;
@@ -1295,10 +1315,17 @@ int decodeCPR(struct aircraft *a, int fflag, int surface) {
     }
 
     if (surface) {
-        a->lon += floor(surface_rlon / 90.0) * 90.0;  // Move from 1st quadrant to our quadrant
-    } else if (a->lon > 180) {
-        a->lon -= 360;
+        // Pick the quadrant that's closest to the reference location -
+        // this is not necessarily the same quadrant that contains the
+        // reference location. Unlike the latitude case, all four
+        // quadrants are valid.
+
+        // if surface_rlon is more than 45 degrees away, move some multiple of 90 degrees towards it
+        a->lon += floor( (surface_rlon - a->lon + 45) / 90 ) * 90;  // this might move us outside (-180..+180), we fix this below
     }
+
+    // Renormalize to -180 .. +180
+    a->lon = cprModFunction(a->lon + 180, 360) - 180;
 
     a->seenLatLon      = a->seen;
     a->timestampLatLon = a->timestamp;
