@@ -162,13 +162,20 @@ static int best_phase(uint16_t *m) {
 // Given 'mlen' magnitude samples in 'm', sampled at 2.4MHz,
 // try to demodulate some Mode S messages.
 //
-void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
+void detectModeS_oversample(uint16_t *m, int mlen) {
     struct modesMessage mm;
     unsigned char msg1[MODES_LONG_MSG_BYTES], msg2[MODES_LONG_MSG_BYTES], *msg;
-    uint32_t j;
+    int j;
+    int last_message_end = -1;
 
     unsigned char *bestmsg;
     int bestscore, bestphase, bestsnr;
+
+    // make these static as a bit of a hack to preserve state between calls
+
+    // noise floor:
+    uint32_t noise_count = 0;
+    uint64_t noise_power = 0;
 
     memset(&mm, 0, sizeof(mm));
     msg = msg1;
@@ -179,6 +186,17 @@ void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
         uint32_t base_signal, base_noise;
         int initial_phase, first_phase, last_phase, try_phase;
         int msglen;
+
+        // update noise for all samples that aren't part of a message
+        // (we don't know if m[j] is or not, yet, so work one sample
+        // in arrears)
+        if ((j-1) > last_message_end) {
+            // There seems to be a weird compiler bug I'm hitting here..
+            // if you compute the square directly, it occasionally gets mangled.
+            uint32_t s = m[j-1];
+            noise_power += s * s;
+            noise_count++;
+        }
 
         // Look for a message starting at around sample 0 with phase offset 3..7
 
@@ -473,13 +491,14 @@ void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
                     Modes.stat_demod.bit_fix[mm.correctedbits-1]++;
             }
         }
-            
+
         // Skip over the message:
         // (we actually skip to 8 bits before the end of the message,
         //  because we can often decode two messages that *almost* collide,
         //  where the preamble of the second message clobbered the last
         //  few bits of the first message, but the message bits didn't
         //  overlap)
+        last_message_end = (8 + msglen)*12/5;
         j += (8 + msglen - 8)*12/5 - 1;
 #if 0
         fprintf(stdout, "skipped to %d", j);
@@ -487,6 +506,15 @@ void detectModeS_oversample(uint16_t *m, uint32_t mlen) {
             
         // Pass data to the next layer
         useModesMessage(&mm);
+    }
+
+    Modes.stat_noise_power += noise_power;
+    Modes.stat_noise_count += noise_count;
+
+    // avoid overflow
+    while (Modes.stat_noise_power > ((uint64_t)1<<60) || Modes.stat_noise_count > ((uint32_t)1<<30)) {
+        Modes.stat_noise_power >>= 1;
+        Modes.stat_noise_count >>= 1;
     }
 }
 

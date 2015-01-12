@@ -644,6 +644,10 @@ static void display_stats(void) {
     printf("%d total usable messages\n",
            Modes.stat_demod.goodcrc + Modes.stat_demod_phasecorrected.goodcrc +
            Modes.stat_demod.fixed + Modes.stat_demod_phasecorrected.fixed);
+
+    printf("Noise floor: %.1f dBFS\n",
+           10 * log10(Modes.stat_noise_power / Modes.stat_noise_count) - 96.33); // 96.33 is 10log10(65536 ** 2) (full range power)
+
     fflush(stdout);
 
     Modes.stat_cputime.tv_sec = 0;
@@ -659,6 +663,9 @@ static void display_stats(void) {
         Modes.stat_DF_Len_Corrected =
         Modes.stat_DF_Type_Corrected = 
         Modes.stat_out_of_phase = 0;
+
+    Modes.stat_noise_power = 0;
+    Modes.stat_noise_count = 0;
 
     for (j = 0;  j < MODES_MAX_PHASE_STATS;  j++) {
         Modes.stat_preamble_phase[j] = 0;

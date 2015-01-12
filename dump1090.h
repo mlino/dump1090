@@ -393,6 +393,10 @@ struct {                             // Internal state
     unsigned int stat_blocks_dropped;
 
     struct timespec stat_cputime;
+
+    // noise floor:
+    uint64_t stat_noise_power;
+    uint32_t stat_noise_count;
 } Modes;
 
 // The struct we use to store information about a decoded message.
