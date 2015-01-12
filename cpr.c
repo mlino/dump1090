@@ -343,8 +343,8 @@ static const struct {
     int odd_cprlat, odd_cprlon;     // input: raw CPR values, odd message
     int even_result;                // verify: expected result from decoding with fflag=0 (even message is latest)
     double even_rlat, even_rlon;    // verify: expected position from decoding with fflag=0 (even message is latest)
-    int odd_result;                 // verify: expected result from decoding with fflag=0 (even message is latest)
-    double odd_rlat, odd_rlon;      // verify: expected position from decoding with fflag=0 (even message is latest)
+    int odd_result;                 // verify: expected result from decoding with fflag=1 (odd message is latest)
+    double odd_rlat, odd_rlon;      // verify: expected position from decoding with fflag=1 (odd message is latest)
 } cprGlobalAirborneTests[] = {
     { 80536, 9432, 61720, 9192, 0, 51.686646, 0.700156, 0, 51.686763, 0.701294 },
     { 80534, 9413, 61714, 9144, 0, 51.686554, 0.698745, 0, 51.686484, 0.697632 },
@@ -359,8 +359,8 @@ static const struct {
     int odd_cprlat, odd_cprlon;     // input: raw CPR values, odd message
     int even_result;                // verify: expected result from decoding with fflag=0 (even message is latest)
     double even_rlat, even_rlon;    // verify: expected position from decoding with fflag=0 (even message is latest)
-    int odd_result;                 // verify: expected result from decoding with fflag=0 (even message is latest)
-    double odd_rlat, odd_rlon;      // verify: expected position from decoding with fflag=0 (even message is latest)
+    int odd_result;                 // verify: expected result from decoding with fflag=1 (odd message is latest)
+    double odd_rlat, odd_rlon;      // verify: expected position from decoding with fflag=1 (odd message is latest)
 } cprGlobalSurfaceTests[] = {
     // The real position received here was on the Cambridge (UK) airport apron at 52.21N 0.177E
     // We mess with the reference location to check that the right quadrant is used.
