@@ -233,6 +233,8 @@ static int doGlobalCPR(struct aircraft *a, int fflag, int surface)
             return (-2); // we consider an out-of-range value to be bad data
     }
 
+    a->lat = lat;
+    a->lon = lon;
     return 0;
 }
 
@@ -294,6 +296,8 @@ static int doLocalCPR(struct aircraft *a, int fflag, int surface)
             return (-2); // we consider an out-of-range value to be bad data
     }
 
+    a->lat = lat;
+    a->lon = lon;
     return 0;
 }
 
