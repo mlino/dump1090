@@ -176,8 +176,24 @@ void interactiveUpdateAircraftModeS() {
 //
 // Receive new messages and populate the interactive mode with more info
 //
+
+// Distance between points on a spherical earth.
+// This has up to 0.5% error because the earth isn't actually spherical
+// (but we don't use it in situations where that matters)
+static double greatcircle(double lat0, double lon0, double lat1, double lon1)
+{
+    lat0 = lat0 * M_PI / 180.0;
+    lon0 = lon0 * M_PI / 180.0;
+    lat1 = lat1 * M_PI / 180.0;
+    lon1 = lon1 * M_PI / 180.0;
+    return 6371e3 * acos(sin(lat0) * sin(lat1) + cos(lat0) * cos(lat1) * cos(fabs(lon0 - lon1)));
+}
+
 static int doGlobalCPR(struct aircraft *a, int fflag, int surface)
 {
+    int result;
+    double lat=0, lon=0;
+
     if (surface) {
         // surface global CPR
         // find reference location
@@ -194,26 +210,39 @@ static int doGlobalCPR(struct aircraft *a, int fflag, int surface)
             return (-1);
         }
 
-        return decodeCPRsurface(reflat, reflon,
-                                a->even_cprlat, a->even_cprlon,
-                                a->odd_cprlat, a->odd_cprlon,
-                                fflag,
-                                &a->lat, &a->lon);
+        result = decodeCPRsurface(reflat, reflon,
+                                  a->even_cprlat, a->even_cprlon,
+                                  a->odd_cprlat, a->odd_cprlon,
+                                  fflag,
+                                  &lat, &lon);
     } else {
         // airborne global CPR
-        return decodeCPRairborne(a->even_cprlat, a->even_cprlon,
-                                 a->odd_cprlat, a->odd_cprlon,
-                                 fflag,
-                                 &a->lat, &a->lon);
+        result = decodeCPRairborne(a->even_cprlat, a->even_cprlon,
+                                   a->odd_cprlat, a->odd_cprlon,
+                                   fflag,
+                                   &lat, &lon);
     }
+
+    if (result < 0)
+        return result;
+
+    // check max range
+    if (Modes.maxRange > 0 && (Modes.bUserFlags & MODES_USER_LATLON_VALID)) {
+        double range = greatcircle(Modes.fUserLat, Modes.fUserLon, lat, lon);
+        if (range > Modes.maxRange)
+            return (-2); // we consider an out-of-range value to be bad data
+    }
+
+    return 0;
 }
 
 static int doLocalCPR(struct aircraft *a, int fflag, int surface)
 {
     // relative CPR
     // find reference location
-    double reflat, reflon;
-    double range_limit;
+    double reflat, reflon, lat=0, lon=0;
+    double range_limit = 0;
+    int result;
 
     if (a->bFlags & MODES_ACFLAGS_LATLON_REL_OK) {
         int elapsed = (int)(time(NULL) - a->seenLatLon);
@@ -223,24 +252,49 @@ static int doLocalCPR(struct aircraft *a, int fflag, int surface)
         reflon = a->lon;
 
         // impose a range limit based on 2000km/h speed
-        range_limit = 10e3 + (2000e3 * elapsed / 3600); // 10km + 2000km/h
-        if (range_limit > 300e3)
-            range_limit = 300e3; // max 300km = 160NN
+        range_limit = 5e3 + (2000e3 * elapsed / 3600); // 5km + 2000km/h
     } else if (!surface && (Modes.bUserFlags & MODES_USER_LATLON_VALID)) {
         reflat = Modes.fUserLat;
         reflon = Modes.fUserLon;
-        range_limit = 100e3; // 100km, about 60NM, this is OK for a receiver with range of about 180 + (180-60)/2  = 240NM.
+        
+        // The cell size is at least 360NM, giving a nominal
+        // max range of 180NM (half a cell).
+        //
+        // If the receiver range is more than half a cell
+        // then we must limit this range further to avoid
+        // ambiguity. (e.g. if we receive a position report
+        // at 200NM distance, this may resolve to a position
+        // at (200-360) = 160NM in the wrong direction)
+        if (Modes.maxRange > 1852*180)
+            range_limit = (1852*360) - Modes.maxRange;
     } else {
         // No local reference, give up
         return (-1);
     }
 
-    return decodeCPRrelative(reflat, reflon,
-                             fflag ? a->odd_cprlat : a->even_cprlat,
-                             fflag ? a->odd_cprlon : a->even_cprlon,
-                             fflag, surface,
-                             range_limit,
-                             &a->lat, &a->lon);
+    result = decodeCPRrelative(reflat, reflon,
+                               fflag ? a->odd_cprlat : a->even_cprlat,
+                               fflag ? a->odd_cprlon : a->even_cprlon,
+                               fflag, surface,
+                               &lat, &lon);
+    if (result < 0)
+        return result;
+
+    // check range limit
+    if (range_limit > 0) {
+        double range = greatcircle(reflat, reflon, lat, lon);
+        if (range > range_limit)
+            return (-1);
+    }
+
+    // check max range
+    if (Modes.maxRange > 0 && (Modes.bUserFlags & MODES_USER_LATLON_VALID)) {
+        double range = greatcircle(Modes.fUserLat, Modes.fUserLon, lat, lon);
+        if (range > Modes.maxRange)
+            return (-2); // we consider an out-of-range value to be bad data
+    }
+
+    return 0;
 }
 
 static void updatePosition(struct aircraft *a, struct modesMessage *mm)

@@ -357,6 +357,7 @@ struct {                             // Internal state
     double fUserLat;                // Users receiver/antenna lat/lon needed for initial surface location
     double fUserLon;                // Users receiver/antenna lat/lon needed for initial surface location
     int    bUserFlags;              // Flags relating to the user details
+    double maxRange;                // Absolute maximum decoding range, in *metres*
 
     // Interactive mode
     struct aircraft *aircrafts;
@@ -488,7 +489,6 @@ int decodeCPRairborne(int even_cprlat, int even_cprlon,
 int  decodeCPRrelative(double reflat, double reflon,
                        int cprlat, int cprlon,
                        int fflag, int surface,
-                       double range_limit,
                        double *out_lat, double *out_lon);
 int modesMessageLenByType(int type);
 
