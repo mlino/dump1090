@@ -640,10 +640,6 @@ static void display_stats(void) {
             display_demod_stats("phase enhanced ", &Modes.stat_demod_phasecorrected);
         }
         
-        printf("%d total usable messages\n",
-               Modes.stat_demod.goodcrc + Modes.stat_demod_phasecorrected.goodcrc +
-               Modes.stat_demod.fixed + Modes.stat_demod_phasecorrected.fixed);
-
         if (Modes.stat_noise_count) {
             printf("Noise floor: %.1f dBFS\n",
                    10 * log10(Modes.stat_noise_power / Modes.stat_noise_count) - 96.33); // 96.33 is 10log10(65536 ** 2) (full range power)
@@ -654,6 +650,9 @@ static void display_stats(void) {
            "%d remote messages rejected\n",
            Modes.stat_remote_accepted,
            Modes.stat_remote_rejected);
+
+    printf("%d total usable messages\n",
+           Modes.stat_messages_total);
 
     printf("%d global CPR attempts with valid positions\n"
            "%d global CPR attempts with bad data\n"
@@ -689,6 +688,8 @@ static void display_stats(void) {
 
     Modes.stat_noise_power = 0;
     Modes.stat_noise_count = 0;
+
+    Modes.stat_messages_total = 0;
 
     Modes.stat_cpr_global_ok = 
         Modes.stat_cpr_global_bad =

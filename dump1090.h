@@ -388,6 +388,9 @@ struct {                             // Internal state
     unsigned int stat_remote_accepted;
     unsigned int stat_remote_rejected;
 
+    // total messages:
+    unsigned int stat_messages_total;
+
     // noise floor:
     uint64_t stat_noise_power;
     uint32_t stat_noise_count;

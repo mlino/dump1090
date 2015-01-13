@@ -1101,6 +1101,8 @@ void computeMagnitudeVector(uint16_t *p) {
 // processing and visualization
 //
 void useModesMessage(struct modesMessage *mm) {
+    ++Modes.stat_messages_total;
+
     // If we are decoding, track aircraft
     interactiveReceiveData(mm);
     
