@@ -765,11 +765,12 @@ static void decodeExtendedSquitter(struct modesMessage *mm)
             mm->raw_latitude  = ((msg[6] & 3) << 15) | (msg[7] << 7) | (msg[8] >> 1);
             mm->raw_longitude = ((msg[8] & 1) << 16) | (msg[9] << 8) | (msg[10]);
 
-            if (!(mm->msg[6] & 0x04) && AC12Field == 0 && mm->raw_longitude == 0 && (mm->raw_latitude & 0x0fff) == 0 && mm->metype == 15) {
+            if (AC12Field == 0 && mm->raw_longitude == 0 && (mm->raw_latitude & 0x0fff) == 0 && mm->metype == 15) {
                 // Seen from at least:
-                //   400F3F (Eurocopter ECC155 B1)
-                //   4008F3 (BAE ATP)
-                // F=0 (even), altitude == 0, longitude == 0, type == 15 and zeros in latitude LSB.
+                //   400F3F (Eurocopter ECC155 B1) - Bristow Helicopters
+                //   4008F3 (BAE ATP) - Atlantic Airlines
+                //   400648 (BAE ATP) - Atlantic Airlines
+                // altitude == 0, longitude == 0, type == 15 and zeros in latitude LSB.
                 // Can alternate with valid reports having type == 14
                 Modes.stat_cpr_filtered++;
             } else {
